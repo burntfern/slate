@@ -1,4 +1,6 @@
 mod core;
+#[cfg(windows)]
+mod win;
 
 use ely_gpui_component::{
     Assets,
