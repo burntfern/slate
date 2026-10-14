@@ -1,3 +1,5 @@
+mod core;
+
 use ely_gpui_component::{
     Assets,
     buttons::Button,
