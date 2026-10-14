@@ -1,0 +1,10 @@
+[package]
+name = "slate"
+version = "0.1.0"
+edition = "2021"
+description = "Universal Window Tabs for Windows"
+
+[dependencies]
+ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components" }
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit"] }
