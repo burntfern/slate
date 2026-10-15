@@ -62,21 +62,20 @@ impl WinEventPump {
         let flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
         let mut hooks = Vec::new();
         unsafe {
-            // One hook covers destroy..=namechange (also gets show/hide/
-            // reorder, which the callback ignores).
-            let range = SetWinEventHook(
-                EVENT_OBJECT_DESTROY,
-                EVENT_OBJECT_NAMECHANGE,
-                None,
-                Some(hook_proc),
-                0,
-                0,
-                flags,
-            );
-            if range.0.is_null() {
-                return None;
+            // One single-event hook per event we act on. A broad
+            // `destroy..=namechange` range would fire the callback for every
+            // window in the system on dozens of unrelated event types; the
+            // narrow ranges keep the callbacks to the two we care about.
+            for event in [EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE] {
+                let hook = SetWinEventHook(event, event, None, Some(hook_proc), 0, 0, flags);
+                if hook.0.is_null() {
+                    for h in hooks.drain(..) {
+                        let _ = UnhookWinEvent(h);
+                    }
+                    return None;
+                }
+                hooks.push(hook);
             }
-            hooks.push(range);
             let fg = SetWinEventHook(
                 EVENT_SYSTEM_FOREGROUND,
                 EVENT_SYSTEM_FOREGROUND,

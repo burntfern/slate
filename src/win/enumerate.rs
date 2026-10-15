@@ -5,16 +5,16 @@
 
 use crate::core::WindowIdentity;
 use std::cell::RefCell;
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
+use windows::core::BOOL;
+use windows::core::PWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Threading::PROCESS_NAME_WIN32;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowThreadProcessId, IsWindowVisible, GW_OWNER, GWL_EXSTYLE, WS_EX_NOACTIVATE,
+    GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW,
 };
-use windows::core::BOOL;
-use windows::core::PWSTR;
 
 thread_local! {
     static FOUND: RefCell<Vec<HWND>> = const { RefCell::new(Vec::new()) };
@@ -65,13 +65,7 @@ unsafe fn is_candidate(hwnd: HWND) -> bool {
     // cloaked UWP windows are invisible ghosts despite IsWindowVisible
     let mut cloaked: u32 = 0;
     let size = std::mem::size_of::<u32>() as u32;
-    if DwmGetWindowAttribute(
-        hwnd,
-        DWMWA_CLOAKED,
-        &mut cloaked as *mut _ as *mut _,
-        size,
-    )
-    .is_ok()
+    if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, size).is_ok()
         && cloaked != 0
     {
         return false;
@@ -79,13 +73,9 @@ unsafe fn is_candidate(hwnd: HWND) -> bool {
     true
 }
 
-/// True if this window belongs to Slate itself (any of our top-level windows).
-pub fn is_slate_window(hwnd: HWND) -> bool {
-    let mut pid = 0u32;
-    unsafe {
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    }
-    pid == std::process::id()
+/// Current title of a window by raw handle. Empty if the handle is gone.
+pub fn window_title(hwnd: isize) -> String {
+    unsafe { wide_to_string(&window_text(HWND(hwnd as *mut _))) }
 }
 
 unsafe fn metadata(hwnd: HWND, our_pid: u32) -> Option<WindowIdentity> {

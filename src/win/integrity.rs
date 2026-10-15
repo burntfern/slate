@@ -2,9 +2,7 @@
 //! Used to disable grouping of admin windows in the picker (spec 02).
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
-use windows::Win32::Security::{
-    GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
-};
+use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -16,8 +14,7 @@ pub fn is_elevated(pid: u32) -> bool {
 }
 
 unsafe fn elevated_inner(pid: u32) -> Option<bool> {
-    let process: HANDLE =
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+    let process: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
     let mut token = HANDLE::default();
     let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token);
     let _ = CloseHandle(process);

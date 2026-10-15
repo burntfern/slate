@@ -1,9 +1,21 @@
 pub mod activate;
+pub mod compat;
 pub mod enumerate;
 pub mod events;
+pub mod highlight;
+pub mod host;
+pub mod icon;
 pub mod integrity;
+pub mod janitor;
+pub mod pick;
+pub mod stack;
 
-pub use activate::activate_window;
-pub use enumerate::{enumerate_windows, is_slate_window};
+pub use activate::{activate_window, window_rect};
+pub use compat::is_blacklisted;
+pub use enumerate::{enumerate_windows, window_title};
 pub use events::{WinEvent, WinEventPump};
-pub use integrity::is_elevated;
+pub use highlight::Highlight;
+pub use host::{register_member, unregister_member, HostWorker, StylingState};
+pub use icon::{install_window_icon, window_icon, IconPixels};
+pub use janitor::Janitor;
+pub use pick::{window_under_cursor, KeyboardCapture, PickKey};
