@@ -3012,6 +3012,7 @@ dependencies = [
  "qoi",
  "ravif",
  "rayon",
+ "rgb",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -5846,8 +5847,11 @@ name = "slate"
 version = "0.1.0"
 dependencies = [
  "ely-gpui-component",
+ "embed-resource",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "windows 0.62.2",
