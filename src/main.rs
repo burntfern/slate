@@ -2,67 +2,53 @@ mod core;
 #[cfg(windows)]
 mod win;
 
-use ely_gpui_component::{
-    Assets,
-    buttons::Button,
-    primitives::FocusScope,
-    theme::ActiveTheme,
-};
-use gpui::{
-    App, AppContext, Context, FocusHandle, IntoElement, ParentElement, Render, Styled, Window,
-    WindowOptions,
-};
+#[cfg(windows)]
+mod controller;
+#[cfg(windows)]
+mod ui;
 
-struct Hello {
-    focus: FocusHandle,
-    presses: usize,
-}
+#[cfg(windows)]
+use ely_gpui_component::Assets;
+#[cfg(windows)]
+use gpui::{px, size, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
 
-impl Render for Hello {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = &cx.theme().colors;
-        let this = cx.entity();
-        FocusScope::new(&self.focus)
-            .root()
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_4()
-            .bg(colors.bg)
-            .text_color(colors.fg)
-            .child("Slate — scaffold check. The real UI lands in the next commit.")
-            .child(format!("Pressed {} times", self.presses))
-            .child(
-                Button::new("press", "Press")
-                    .primary()
-                    .on_click(move |_, _, cx| {
-                        this.update(cx, |hello, cx| {
-                            hello.presses += 1;
-                            cx.notify();
-                        });
-                    }),
-            )
-    }
-}
-
+#[cfg(windows)]
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--janitor") {
+        let path = args.get(i + 1).cloned().unwrap_or_default();
+        let pid = args.get(i + 2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        win::janitor::run(std::path::PathBuf::from(path), pid);
+        return;
+    }
     gpui_platform::application()
         .with_assets(Assets)
-        .run(|cx: &mut App| {
+        .run(|cx: &mut gpui::App| {
             ely_gpui_component::init(cx).expect("Ely failed to start");
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                cx.new(|cx| {
-                    let focus = cx.focus_handle();
-                    window.focus(&focus, cx);
-                    Hello {
-                        focus,
-                        presses: 0,
-                    }
-                })
+            let controller = cx.new(controller::Controller::new);
+
+            let bounds = Bounds::centered(None, size(px(1100.0), px(720.0)), cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // Hide the native title bar so only Ely's drawn controls remain.
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Slate".into()),
+                    appears_transparent: true,
+                    traffic_light_position: None,
+                }),
+                window_min_size: Some(size(px(640.0), px(420.0))),
+                ..Default::default()
+            };
+            cx.open_window(options, move |_window, cx| {
+                cx.new(|cx| ui::HostWindow::new(controller, cx))
             })
-            .expect("window failed to open");
+            .expect("host window failed to open");
+
             cx.activate(true);
         });
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("Slate is Windows-only.");
 }
