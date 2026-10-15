@@ -5,11 +5,12 @@
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    GetWindowRect, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow,
+    ShowWindow, SW_RESTORE, WM_CLOSE,
 };
 
 /// Bring the given window to the foreground. Returns true on best-effort
@@ -35,6 +36,14 @@ pub fn activate_window(hwnd: isize) -> bool {
             false
         }
     }
+}
+
+/// Ask the given window to close, exactly as if the user clicked its own
+/// close button: post `WM_CLOSE` and let the app run its own shutdown. The
+/// window is *destroyed*, not un-hosted. Best-effort; never panics.
+pub fn close_window(hwnd: isize) -> bool {
+    let h = HWND(hwnd as *mut _);
+    unsafe { PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok() }
 }
 
 /// A window's on-screen rectangle as `(x, y, width, height)` in physical

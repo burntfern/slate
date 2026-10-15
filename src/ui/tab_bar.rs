@@ -1,13 +1,12 @@
 //! Host tab bar. A copy of ely's `TabBar` with two changes Slate needs: tabs
-//! can show a host's real window icon (an `Arc<RenderImage>`), and the trailing
-//! `+` button uses the default control size so it matches the title-bar buttons
-//! instead of ely's smaller `ControlSize::Sm` add button.
+//! can show a host's real window icon (an `Arc<RenderImage>`), and each tab
+//! carries a right-click context hook (the title bar owns the `+` picker).
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use ely_gpui_component::{
-    buttons::IconButton,
+    buttons::close_button,
     motion,
     primitives::{DragGhost, Icon, IconName, Image},
     theme::{ActiveTheme, ControlSize, IconSize, Radius, TextSize},
@@ -15,8 +14,8 @@ use ely_gpui_component::{
 };
 use gpui::{
     div, prelude::*, Animation, AnimationExt, App, ElementId, EntityId, FontWeight,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, RenderImage, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderImage,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 
 /// What to draw at the start of a tab.
@@ -52,8 +51,8 @@ struct TabDrag {
 }
 
 type OnTab = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
-type OnAdd = Rc<dyn Fn(&mut Window, &mut App)>;
 type OnReorder = Rc<dyn Fn(usize, usize, &mut Window, &mut App)>;
+type OnContext = Rc<dyn Fn(&SharedString, Point<Pixels>, &mut Window, &mut App)>;
 
 /// Browser-style tabs across the top of the host window.
 #[derive(IntoElement)]
@@ -63,8 +62,8 @@ pub struct SlateTabBar {
     selected: Option<SharedString>,
     on_select: Option<OnTab>,
     on_close: Option<OnTab>,
-    on_add: Option<OnAdd>,
     on_reorder: Option<OnReorder>,
+    on_context: Option<OnContext>,
 }
 
 impl SlateTabBar {
@@ -75,8 +74,8 @@ impl SlateTabBar {
             selected: None,
             on_select: None,
             on_close: None,
-            on_add: None,
             on_reorder: None,
+            on_context: None,
         }
     }
 
@@ -106,18 +105,22 @@ impl SlateTabBar {
         self
     }
 
-    /// Shows a new-tab button after the tabs at the default control size.
-    pub fn on_add(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        self.on_add = Some(Rc::new(handler));
-        self
-    }
-
     /// Lets tabs drag; reports `(from, to)` indexes on drop.
     pub fn on_reorder(
         mut self,
         handler: impl Fn(usize, usize, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_reorder = Some(Rc::new(handler));
+        self
+    }
+
+    /// Reports a right-click on a tab, with the window-space position of the
+    /// press so a context menu can open exactly there.
+    pub fn on_context(
+        mut self,
+        handler: impl Fn(&SharedString, Point<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_context = Some(Rc::new(handler));
         self
     }
 }
@@ -140,10 +143,11 @@ impl RenderOnce for SlateTabBar {
             let colors = &theme.colors;
             let selected = self.selected.as_ref() == Some(&tab.id);
             let group = SharedString::from(format!("window-tab-{}", tab.id));
-            let (select, close, reorder) = (
+            let (select, close, reorder, context) = (
                 self.on_select.clone(),
                 self.on_close.clone(),
                 self.on_reorder.clone(),
+                self.on_context.clone(),
             );
             let (id, close_id) = (tab.id.clone(), tab.id.clone());
             let title = tab.title.clone();
@@ -198,6 +202,15 @@ impl RenderOnce for SlateTabBar {
                         }
                     }
                 })
+                .on_mouse_down(MouseButton::Right, {
+                    let context = context.clone();
+                    let id = tab.id.clone();
+                    move |event, window, cx| {
+                        if let Some(context) = context.as_ref() {
+                            context(&id, event.position, window, cx);
+                        }
+                    }
+                })
                 .on_click(move |_, window, cx| {
                     if let Some(select) = &select {
                         select(&id, window, cx);
@@ -244,7 +257,7 @@ impl RenderOnce for SlateTabBar {
                                 slot.invisible().group_hover(group, |style| style.visible())
                             })
                             .child(
-                                IconButton::new(("close", ix), IconName::X)
+                                close_button(("close", ix))
                                     .size(ControlSize::Sm)
                                     .on_click(move |_, window, cx| {
                                         cx.stop_propagation();
@@ -272,15 +285,5 @@ impl RenderOnce for SlateTabBar {
             .w_full()
             .min_w_0()
             .children(tabs)
-            .when_some(self.on_add, |root, add| {
-                // Deliberately no `.size(...)`: the default control size
-                // matches the title-bar buttons (fixes the undersized `+`).
-                root.child(
-                    div().flex_none().occlude().child(
-                        IconButton::new("new-tab", IconName::Plus)
-                            .on_click(move |_, window, cx| add(window, cx)),
-                    ),
-                )
-            })
     }
 }

@@ -10,7 +10,7 @@ pub mod janitor;
 pub mod pick;
 pub mod stack;
 
-pub use activate::{activate_window, window_rect};
+pub use activate::{activate_window, close_window, window_rect};
 pub use compat::is_blacklisted;
 pub use enumerate::{enumerate_windows, window_title};
 pub use events::{WinEvent, WinEventPump};

@@ -14,10 +14,10 @@ use gpui::{AppContext, Context, Entity, RenderImage};
 
 use crate::core::{Effect, GroupId, GroupSet, TabId, WindowIdentity};
 use crate::win::{
-    activate_window, enumerate_windows, install_window_icon, is_blacklisted, register_member,
-    unregister_member, window_icon, window_rect, window_title, window_under_cursor, Highlight,
-    HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey, StylingState, WinEvent,
-    WinEventPump,
+    activate_window, close_window, enumerate_windows, install_window_icon, is_blacklisted,
+    register_member, unregister_member, window_icon, window_rect, window_title,
+    window_under_cursor, Highlight, HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey,
+    StylingState, WinEvent, WinEventPump,
 };
 
 /// UI → controller intent. The UI never calls Win32 directly.
@@ -33,6 +33,12 @@ pub enum Cmd {
         tab: TabId,
     },
     Ungroup {
+        group: GroupId,
+        tab: TabId,
+    },
+    /// Actually close a hosted window (posts `WM_CLOSE`), as opposed to
+    /// `Ungroup`, which only returns it to a standalone window.
+    CloseTab {
         group: GroupId,
         tab: TabId,
     },
@@ -59,9 +65,28 @@ pub enum Cmd {
     /// `ToggleOverlay`, the chevron uses this rather than `SetTabMenu(!captured)`
     /// so a click that outpaces a re-render can't reopen an already-open panel.
     ToggleTabMenu,
-    /// Place the theme toggle button on the left (next to the app menu) or the
-    /// right (after the tab-overflow chevron), just before the window controls.
-    SetThemeButtonRight(bool),
+    /// Host a specific enumerated window (chosen from the `+` picker).
+    AddWindow { hwnd: isize },
+    /// Close every tab in the group except `tab`.
+    CloseOtherTabs { group: GroupId, tab: TabId },
+    /// Close every tab to the right of `tab`.
+    CloseTabsToRight { group: GroupId, tab: TabId },
+    /// Close every tab to the left of `tab`.
+    CloseTabsToLeft { group: GroupId, tab: TabId },
+    /// Open the tab right-click menu at a window-space point (hides the member
+    /// while open, like the other overlays).
+    OpenTabMenu { tab: TabId, at: (f32, f32) },
+    CloseTabMenu,
+    /// Open the rename prompt for a tab.
+    BeginRename { group: GroupId, tab: TabId },
+    CancelRename,
+    /// Set a tab's display title override (empty clears it).
+    RenameTab { group: GroupId, tab: TabId, title: String },
+    /// Open/close the `+` window picker (hides the member while open).
+    SetPickerOpen(bool),
+    TogglePicker,
+    /// Show/hide the tab-count badge on the overflow chevron.
+    ToggleTabBadge,
     Shutdown,
 }
 
@@ -69,16 +94,15 @@ pub enum Cmd {
 #[derive(Debug, Clone, Copy)]
 pub struct HostSettings {
     pub icons_in_tabs: bool,
-    /// Theme toggle on the right of the title bar (after the overflow chevron)
-    /// instead of the left (next to the app menu).
-    pub theme_button_right: bool,
+    /// Show the tab-count badge on the overflow chevron.
+    pub show_tab_badge: bool,
 }
 
 impl Default for HostSettings {
     fn default() -> Self {
         Self {
             icons_in_tabs: true,
-            theme_button_right: false,
+            show_tab_badge: true,
         }
     }
 }
@@ -98,8 +122,29 @@ fn pick_toast() -> Toast {
 pub struct TabInfo {
     pub id: TabId,
     pub title: String,
+    /// Friendly app name derived from the executable (e.g. "Chrome").
+    pub app: String,
+    /// The executable file name (e.g. "chrome.exe").
+    pub exe: String,
+    /// Full path to the executable (for "Copy exe path").
+    pub exe_path: String,
     /// The window's real icon, ready to render (present only when extracted).
     pub icon: Option<Arc<RenderImage>>,
+}
+
+/// Best-effort friendly app name from an executable file name: strip the
+/// extension and upper-case the first letter (`"chrome.exe"` → `"Chrome"`).
+fn app_name(exe_name: &str) -> String {
+    let stem = exe_name
+        .strip_suffix(".exe")
+        .or_else(|| exe_name.strip_suffix(".EXE"))
+        .unwrap_or(exe_name)
+        .trim();
+    let mut chars = stem.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => exe_name.to_string(),
+    }
 }
 
 /// A UI-facing snapshot of the active host group.
@@ -109,12 +154,40 @@ pub struct HostInfo {
     pub tabs: Vec<TabInfo>,
     pub active: Option<TabId>,
     pub icons_in_tabs: bool,
-    /// Theme toggle on the right of the title bar (after the overflow chevron).
-    pub theme_button_right: bool,
+    /// Show the tab-count badge on the overflow chevron.
+    pub show_tab_badge: bool,
     /// True while a UI overlay (menu) is open and the member is hidden.
     pub overlay: bool,
     /// True while the tab-overflow dropdown is open and the member is hidden.
     pub tab_menu_open: bool,
+    /// True while the `+` picker is open and the member is hidden.
+    pub picker_open: bool,
+    /// Rows for the `+` picker (running windows + eligibility).
+    pub picker_rows: Vec<PickerRow>,
+    /// The tab right-click menu's target and window-space position, if open.
+    pub tab_menu: Option<TabMenu>,
+    /// The tab currently being renamed, if any.
+    pub renaming: Option<TabId>,
+    /// True while pick mode is armed (the bar shows a spinner).
+    pub picking: bool,
+}
+
+/// The tab right-click menu: which tab, and where it was requested.
+#[derive(Clone)]
+pub struct TabMenu {
+    pub tab: TabId,
+    pub at: (f32, f32),
+}
+
+/// One row of the `+` window picker.
+#[derive(Clone)]
+pub struct PickerRow {
+    pub hwnd: isize,
+    pub title: String,
+    pub exe: String,
+    pub icon: Option<Arc<RenderImage>>,
+    /// `Some` when the window can't be hosted; the string is the reason.
+    pub reason: Option<String>,
 }
 
 pub struct Controller {
@@ -139,6 +212,17 @@ pub struct Controller {
     /// True while the tab-overflow dropdown is open; like `overlay`, it hides the
     /// active member so the dropdown isn't covered by the owned window.
     tab_menu_open: bool,
+    /// True while the `+` picker is open (hides the member, same reason).
+    picker_open: bool,
+    /// Cached rows for the `+` picker, rebuilt each time it opens.
+    picker_rows: Vec<PickerRow>,
+    /// The tab right-click menu's target and position, if open.
+    tab_menu: Option<TabMenu>,
+    /// The tab being renamed, if any (opens the rename prompt).
+    renaming: Option<(GroupId, TabId)>,
+    /// Display-title overrides for renamed tabs, keyed by hwnd. Takes precedence
+    /// over the live window title and survives retitle events.
+    rename_overrides: HashMap<isize, String>,
     _pump: Option<WinEventPump>,
 }
 
@@ -163,6 +247,11 @@ impl Controller {
             icons: HashMap::new(),
             overlay: false,
             tab_menu_open: false,
+            picker_open: false,
+            picker_rows: Vec::new(),
+            tab_menu: None,
+            renaming: None,
+            rename_overrides: HashMap::new(),
             _pump: WinEventPump::install(),
             toaster,
         };
@@ -208,7 +297,14 @@ impl Controller {
                         .iter()
                         .map(|t| TabInfo {
                             id: t.id,
-                            title: t.window.title.clone(),
+                            title: self
+                                .rename_overrides
+                                .get(&t.window.hwnd)
+                                .cloned()
+                                .unwrap_or_else(|| t.window.title.clone()),
+                            app: app_name(&t.window.exe_name),
+                            exe: t.window.exe_name.clone(),
+                            exe_path: t.window.exe_path.clone(),
                             icon: self.icons.get(&t.window.hwnd).cloned().flatten(),
                         })
                         .collect()
@@ -216,9 +312,14 @@ impl Controller {
                 .unwrap_or_default(),
             active: group.and_then(|g| g.active),
             icons_in_tabs: self.settings.icons_in_tabs,
-            theme_button_right: self.settings.theme_button_right,
+            show_tab_badge: self.settings.show_tab_badge,
             overlay: self.overlay,
             tab_menu_open: self.tab_menu_open,
+            picker_open: self.picker_open,
+            picker_rows: self.picker_rows.clone(),
+            tab_menu: self.tab_menu.clone(),
+            renaming: self.renaming.map(|(_, tab)| tab),
+            picking: self.picking,
         }
     }
 
@@ -243,14 +344,48 @@ impl Controller {
             }
             Cmd::SelectTab { group, tab } => self.select_tab(group, tab),
             Cmd::Ungroup { group, tab } => self.ungroup(group, tab),
+            Cmd::CloseTab { group, tab } => self.close_tab(group, tab),
             Cmd::ReorderTab { group, from, to } => self.reorder(group, from, to),
             Cmd::BeginPick => self.begin_pick(cx),
             Cmd::ToggleIconsInTabs => self.toggle_icons_in_tabs(),
             Cmd::SetOverlay(open) => self.overlay = open,
             Cmd::ToggleOverlay => self.overlay = !self.overlay,
-            Cmd::SetTabMenu(open) => self.tab_menu_open = open,
-            Cmd::ToggleTabMenu => self.tab_menu_open = !self.tab_menu_open,
-            Cmd::SetThemeButtonRight(right) => self.settings.theme_button_right = right,
+            Cmd::SetTabMenu(open) => {
+                self.tab_menu_open = open;
+                if open {
+                    self.picker_open = false;
+                    self.tab_menu = None;
+                }
+            }
+            Cmd::ToggleTabMenu => {
+                self.tab_menu_open = !self.tab_menu_open;
+                if self.tab_menu_open {
+                    self.picker_open = false;
+                    self.tab_menu = None;
+                }
+            }
+            Cmd::AddWindow { hwnd } => self.add_window(hwnd),
+            Cmd::CloseOtherTabs { group, tab } => self.close_other_tabs(group, tab),
+            Cmd::CloseTabsToRight { group, tab } => self.close_tabs_to_right(group, tab),
+            Cmd::CloseTabsToLeft { group, tab } => self.close_tabs_to_left(group, tab),
+            Cmd::OpenTabMenu { tab, at } => {
+                self.tab_menu = Some(TabMenu { tab, at });
+                self.tab_menu_open = false;
+                self.picker_open = false;
+            }
+            Cmd::CloseTabMenu => self.tab_menu = None,
+            Cmd::BeginRename { group, tab } => {
+                self.tab_menu = None;
+                self.renaming = Some((group, tab));
+            }
+            Cmd::CancelRename => self.renaming = None,
+            Cmd::RenameTab { group, tab, title } => self.rename_tab(group, tab, title),
+            Cmd::SetPickerOpen(open) => self.set_picker_open(open),
+            Cmd::TogglePicker => {
+                let open = !self.picker_open;
+                self.set_picker_open(open);
+            }
+            Cmd::ToggleTabBadge => self.settings.show_tab_badge = !self.settings.show_tab_badge,
             Cmd::Shutdown => self.shutdown(),
         }
         self.sync_worker();
@@ -274,6 +409,13 @@ impl Controller {
         self.groups = GroupSet::new();
         self.active_group = None;
         self.host_hwnd = None;
+        self.overlay = false;
+        self.tab_menu_open = false;
+        self.picker_open = false;
+        self.picker_rows.clear();
+        self.tab_menu = None;
+        self.renaming = None;
+        self.rename_overrides.clear();
         self.worker.stop();
     }
 
@@ -425,7 +567,21 @@ impl Controller {
             unregister_member(hwnd, &state);
         }
         self.icons.remove(&hwnd);
+        self.rename_overrides.remove(&hwnd);
         self.groups.remove_tab(group, tab);
+    }
+
+    /// Really close a hosted window: post `WM_CLOSE` and let the app quit on
+    /// its own terms. The member is first released so the host stops pinning
+    /// it; the resulting destroy event then clears the tab via `window_gone`.
+    fn close_tab(&mut self, group: GroupId, tab: TabId) {
+        let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
+            return;
+        };
+        if let Some(state) = self.styling.remove(&hwnd) {
+            unregister_member(hwnd, &state);
+        }
+        close_window(hwnd);
     }
 
     /// Reorder a tab within its group by index.
@@ -441,12 +597,129 @@ impl Controller {
         self.groups.reorder(group, tab, to);
     }
 
+    /// Close every tab in the group except `keep` (each window is restored).
+    fn close_other_tabs(&mut self, group: GroupId, keep: TabId) {
+        let Some(g) = self.groups.group(group) else {
+            return;
+        };
+        let ids: Vec<TabId> = g.tabs.iter().map(|t| t.id).filter(|id| *id != keep).collect();
+        for id in ids {
+            self.ungroup(group, id);
+        }
+    }
+
+    /// Close every tab positioned to the right of `tab`.
+    fn close_tabs_to_right(&mut self, group: GroupId, tab: TabId) {
+        let Some(g) = self.groups.group(group) else {
+            return;
+        };
+        let Some(ix) = g.tabs.iter().position(|t| t.id == tab) else {
+            return;
+        };
+        let ids: Vec<TabId> = g.tabs.iter().skip(ix + 1).map(|t| t.id).collect();
+        for id in ids {
+            self.ungroup(group, id);
+        }
+    }
+
+    /// Close every tab positioned to the left of `tab`.
+    fn close_tabs_to_left(&mut self, group: GroupId, tab: TabId) {
+        let Some(g) = self.groups.group(group) else {
+            return;
+        };
+        let Some(ix) = g.tabs.iter().position(|t| t.id == tab) else {
+            return;
+        };
+        let ids: Vec<TabId> = g.tabs.iter().take(ix).map(|t| t.id).collect();
+        for id in ids {
+            self.ungroup(group, id);
+        }
+    }
+
+    /// Set (or clear, when empty) a tab's display-title override.
+    fn rename_tab(&mut self, group: GroupId, tab: TabId, title: String) {
+        let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
+            return;
+        };
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            self.rename_overrides.remove(&hwnd);
+        } else {
+            self.rename_overrides.insert(hwnd, trimmed.to_string());
+        }
+        self.renaming = None;
+    }
+
+    /// Open or close the `+` picker, rebuilding its rows on open.
+    fn set_picker_open(&mut self, open: bool) {
+        self.picker_open = open;
+        if open {
+            // Only one dropdown is open at a time.
+            self.tab_menu_open = false;
+            self.tab_menu = None;
+            self.refresh_picker();
+        }
+    }
+
+    /// Rebuild the picker rows: eligible windows first, each flagged with a
+    /// reason when it can't be hosted. Extracts icons for eligible rows.
+    fn refresh_picker(&mut self) {
+        let hosted: Vec<isize> = self.styling.keys().copied().collect();
+        let eligible: Vec<isize> = self
+            .windows
+            .iter()
+            .filter(|w| !is_blacklisted(&w.class) && !w.elevated && !hosted.contains(&w.hwnd))
+            .map(|w| w.hwnd)
+            .collect();
+        for hwnd in eligible {
+            self.ensure_icon(hwnd);
+        }
+        let mut rows: Vec<PickerRow> = self
+            .windows
+            .iter()
+            .map(|w| {
+                let reason = if is_blacklisted(&w.class) {
+                    Some("This window can't be hosted".to_string())
+                } else if w.elevated {
+                    Some("Run Slate as administrator to host this".to_string())
+                } else if hosted.contains(&w.hwnd) {
+                    Some("Already hosted".to_string())
+                } else {
+                    None
+                };
+                PickerRow {
+                    hwnd: w.hwnd,
+                    title: if w.title.is_empty() {
+                        w.exe_name.clone()
+                    } else {
+                        w.title.clone()
+                    },
+                    exe: w.exe_name.clone(),
+                    icon: self.icons.get(&w.hwnd).cloned().flatten(),
+                    reason,
+                }
+            })
+            .collect();
+        // Eligible first, then alphabetically; stable within each bucket.
+        rows.sort_by(|a, b| {
+            a.reason
+                .is_some()
+                .cmp(&b.reason.is_some())
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        self.picker_rows = rows;
+    }
+
     /// A destroyed foreign window is no longer hostable: drop its tab.
     fn window_gone(&mut self, hwnd: isize) {
         self.styling.remove(&hwnd);
         self.icons.remove(&hwnd);
+        self.rename_overrides.remove(&hwnd);
         self.windows.retain(|w| w.hwnd != hwnd);
         self.groups.window_destroyed(hwnd);
+        if self.picker_open {
+            self.refresh_picker();
+        }
     }
 
     /// Show/hide the real window icon in each tab, extracting on first enable.
@@ -481,7 +754,11 @@ impl Controller {
                     self.window_gone(hwnd);
                     changed = true;
                 }
-                WinEvent::TitleChanged(hwnd) if self.styling.contains_key(&hwnd) => {
+                WinEvent::TitleChanged(hwnd)
+                    if self.styling.contains_key(&hwnd)
+                        && !self.rename_overrides.contains_key(&hwnd) =>
+                {
+                    // A renamed tab keeps its override; the live title is ignored.
                     let title = window_title(hwnd);
                     if self.groups.update_title(hwnd, &title) == Effect::Applied {
                         changed = true;
@@ -504,7 +781,12 @@ impl Controller {
         // While a UI overlay (menu) or the tab-overflow dropdown is open, hide
         // the active member too: an owned window always paints above the host,
         // so it would cover them otherwise.
-        let active = if self.overlay || self.tab_menu_open {
+        let overlaying = self.overlay
+            || self.tab_menu_open
+            || self.picker_open
+            || self.tab_menu.is_some()
+            || self.renaming.is_some();
+        let active = if overlaying {
             None
         } else {
             self.active_group.and_then(|g| self.active_hwnd(g))
