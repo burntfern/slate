@@ -9,7 +9,9 @@ pub struct Tab {
 #[derive(Debug, Clone)]
 pub struct Group {
     pub id: GroupId,
+    #[allow(dead_code)] // rename UI lands in a later milestone (spec 03/04)
     pub name: String,
+    #[allow(dead_code)] // collapse UI lands in a later milestone (spec 03)
     pub collapsed: bool,
     pub tabs: Vec<Tab>,
     pub active: Option<TabId>,
@@ -78,6 +80,7 @@ impl GroupSet {
     }
 
     /// Dissolving never touches the windows themselves — they stay open.
+    #[allow(dead_code)] // dissolve UI lands with multi-group support (spec 03)
     pub fn dissolve(&mut self, id: GroupId) -> Effect {
         let before = self.groups.len();
         self.groups.retain(|g| g.id != id);
@@ -165,11 +168,14 @@ impl GroupSet {
     }
 
     /// Move a tab from one group to another (drag between strips).
+    #[allow(dead_code)] // cross-group drag lands with multi-group support (spec 03)
     pub fn move_tab(&mut self, from: GroupId, tab: TabId, to: GroupId) -> Effect {
         if from == to {
             return Effect::Noop;
         }
-        let Some(idx) = self.group(from).and_then(|g| g.tabs.iter().position(|t| t.id == tab))
+        let Some(idx) = self
+            .group(from)
+            .and_then(|g| g.tabs.iter().position(|t| t.id == tab))
         else {
             return Effect::Noop;
         };
@@ -182,7 +188,9 @@ impl GroupSet {
         }
         let Some(dest) = self.group_mut(to) else {
             // destination vanished: put the tab back where it was
-            self.group_mut(from).map(|g| g.tabs.insert(idx, t));
+            if let Some(g) = self.group_mut(from) {
+                g.tabs.insert(idx, t);
+            }
             return Effect::Noop;
         };
         if dest.active.is_none() {
@@ -192,6 +200,7 @@ impl GroupSet {
         Effect::Applied
     }
 
+    #[allow(dead_code)] // rename UI lands in a later milestone (spec 03/04)
     pub fn rename(&mut self, id: GroupId, name: &str) -> Effect {
         let Some(g) = self.group_mut(id) else {
             return Effect::Noop;
@@ -203,6 +212,7 @@ impl GroupSet {
         Effect::Applied
     }
 
+    #[allow(dead_code)] // collapse UI lands in a later milestone (spec 03)
     pub fn set_collapsed(&mut self, id: GroupId, collapsed: bool) -> Effect {
         let Some(g) = self.group_mut(id) else {
             return Effect::Noop;
@@ -323,7 +333,11 @@ mod tests {
         let mut s = GroupSet::new();
         let g = s.create_group(
             "Dev",
-            vec![win(100, "a.exe", "A"), win(200, "b.exe", "B"), win(300, "c.exe", "C")],
+            vec![
+                win(100, "a.exe", "A"),
+                win(200, "b.exe", "B"),
+                win(300, "c.exe", "C"),
+            ],
         );
         let first = s.group(g).unwrap().tabs[0].id;
         assert_eq!(s.reorder(g, first, 2), Effect::Applied);
@@ -374,7 +388,10 @@ mod tests {
     #[test]
     fn update_title_only_touches_matching_hwnd() {
         let mut s = GroupSet::new();
-        let g = s.create_group("Dev", vec![win(100, "a.exe", "Old"), win(200, "b.exe", "B")]);
+        let g = s.create_group(
+            "Dev",
+            vec![win(100, "a.exe", "Old"), win(200, "b.exe", "B")],
+        );
         assert_eq!(s.update_title(100, "New"), Effect::Applied);
         assert_eq!(s.update_title(100, "New"), Effect::Noop);
         assert_eq!(s.group(g).unwrap().tabs[0].window.title, "New");
