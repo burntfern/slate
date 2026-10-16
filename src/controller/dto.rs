@@ -7,7 +7,6 @@ use std::time::Duration;
 use crate::core::{GroupId, TabId};
 use crate::win::{IconPixels, WindowSnapshot};
 
-/// UI → controller intent. The UI never calls Win32 directly.
 #[derive(Debug, Clone)]
 pub enum Cmd {
     Refresh,
@@ -23,14 +22,10 @@ pub enum Cmd {
         group: GroupId,
         tab: TabId,
     },
-    /// Post `WM_CLOSE` to the hosted window, as opposed to `Ungroup`, which only
-    /// returns it to a standalone window.
     CloseTab {
         group: GroupId,
         tab: TabId,
     },
-    /// Drag a tab out and drop it over the content area: ungroup it and move the
-    /// restored window to the drop's screen position.
     DetachTabOut {
         from: usize,
         screen_x: f32,
@@ -44,13 +39,8 @@ pub enum Cmd {
     BeginPick,
     ToggleIconsInTabs,
     SetOverlay(bool),
-    /// Flip the overlay flag from its *current* value. The menu button uses this
-    /// rather than `SetOverlay(!captured)`: a captured value goes stale when
-    /// clicks outpace re-renders, desyncing the flag from the menu.
     ToggleOverlay,
     SetTabMenu(bool),
-    /// Flip the tab-overflow dropdown from its *current* value, for the same
-    /// staleness reason as `ToggleOverlay`.
     ToggleTabMenu,
     AddWindow {
         hwnd: isize,
@@ -88,33 +78,30 @@ pub enum Cmd {
     ToggleSavedMenu,
     BeginSaveSet,
     BeginRenameSet {
-        index: usize,
+        id: u64,
     },
     CancelSavedPrompt,
     CommitSaveSet {
         name: String,
     },
     CommitRenameSet {
-        index: usize,
+        id: u64,
         name: String,
     },
     RestoreSet {
-        index: usize,
+        id: u64,
     },
     DeleteSet {
-        index: usize,
+        id: u64,
     },
     ToggleTabBadge,
     ToggleHoverPreview,
     ToggleTheme,
-    /// Session-only accent (chart-hue index); forgotten on restart.
     SetTabColor {
         group: GroupId,
         tab: TabId,
         color: Option<usize>,
     },
-    /// Hover a tab: after a rest, open the preview card under it. `anchor` is the
-    /// tab's rectangle in logical client pixels.
     PreviewTab {
         tab: TabId,
         anchor: (f32, f32, f32, f32),
@@ -127,21 +114,17 @@ pub enum Cmd {
     ToggleTabBar,
 }
 
-/// One tab in the UI-facing snapshot.
 #[derive(Clone)]
 pub struct TabInfo {
     pub id: TabId,
     pub title: String,
-    /// Friendly app name derived from the executable (e.g. "Chrome").
     pub app: String,
     pub exe: String,
     pub exe_path: String,
     pub icon: Option<Arc<RenderImage>>,
-    /// Chart-hue index (see `HUE_NAMES`), or `None` for the plain default tab.
     pub accent: Option<usize>,
 }
 
-/// A UI-facing snapshot of the active host group.
 #[derive(Clone, Default)]
 pub struct HostInfo {
     pub group: Option<GroupId>,
@@ -164,44 +147,35 @@ pub struct HostInfo {
     pub show_tab_bar: bool,
 }
 
-/// The tab right-click menu: which tab, and where it was requested.
 #[derive(Clone)]
 pub struct TabMenu {
     pub tab: TabId,
     pub at: (f32, f32),
 }
 
-/// One row of the `+` window picker.
 #[derive(Clone)]
 pub struct PickerRow {
     pub hwnd: isize,
     pub title: String,
     pub exe: String,
     pub icon: Option<Arc<RenderImage>>,
-    /// `Some` when the window can't be hosted; the string is the reason.
     pub reason: Option<String>,
 }
 
-/// One row of the Saved-tab-sets panel.
 #[derive(Clone)]
 pub struct SavedSetInfo {
+    pub id: u64,
     pub name: String,
     pub count: usize,
-    /// Tabs with a matching window running right now (and not already hosted).
-    /// The rest are "closed" — attach-only, so they won't open.
     pub available: usize,
 }
 
-/// The Saved-tab-sets inline name prompt: saving the current tabs as a new set,
-/// or renaming the set at `index`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SavedPrompt {
     Save,
-    Rename(usize),
+    Rename(u64),
 }
 
-/// The hover preview card: the tab it mirrors, its `anchor` rectangle in logical
-/// client pixels, and the frame to show (`None` if never on screen to sample).
 #[derive(Clone)]
 pub struct HoverPreview {
     pub tab: TabId,
@@ -209,8 +183,6 @@ pub struct HoverPreview {
     pub image: Option<Arc<RenderImage>>,
 }
 
-/// The single pick-mode toast. Other feedback is silent: a toast painted in the
-/// host is covered by the hosted window whenever one is on screen.
 pub(super) fn pick_toast() -> Toast {
     Toast::new("Add a window")
         .severity(Severity::Info)
@@ -218,8 +190,6 @@ pub(super) fn pick_toast() -> Toast {
         .stay(Some(Duration::from_secs(4)))
 }
 
-/// Best-effort friendly app name from an executable file name: strip the
-/// extension and upper-case the first letter (`"chrome.exe"` → `"Chrome"`).
 pub(super) fn app_name(exe_name: &str) -> String {
     let stem = exe_name
         .strip_suffix(".exe")
@@ -233,13 +203,11 @@ pub(super) fn app_name(exe_name: &str) -> String {
     }
 }
 
-/// Decode raw RGBA pixels into a gpui image, once per window.
 pub(super) fn render_image(px: IconPixels) -> Option<Arc<RenderImage>> {
     let buffer = image::RgbaImage::from_raw(px.width, px.height, px.rgba)?;
     Some(crate::ui::render_image(buffer))
 }
 
-/// Wrap a captured window frame as a gpui image.
 pub(super) fn render_snapshot(snap: WindowSnapshot) -> Option<Arc<RenderImage>> {
     let buffer = image::RgbaImage::from_raw(snap.width, snap.height, snap.rgba)?;
     Some(crate::ui::render_image(buffer))

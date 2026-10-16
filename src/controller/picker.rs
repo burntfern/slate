@@ -3,17 +3,14 @@ use super::Controller;
 use crate::win::is_blacklisted;
 
 impl Controller {
-    /// Open or close the `+` picker, rebuilding its rows on open.
     pub(super) fn set_picker_open(&mut self, open: bool) {
-        self.picker_open = open;
         if open {
             self.close_other_dropdowns();
             self.refresh_picker();
         }
+        self.picker_open = open;
     }
 
-    /// Rebuild the picker rows: eligible windows first, each flagged with a
-    /// reason when it can't be hosted. Extracts icons for eligible rows.
     pub(super) fn refresh_picker(&mut self) {
         let hosted: Vec<isize> = self.styling.keys().copied().collect();
         let eligible: Vec<isize> = self
@@ -51,7 +48,6 @@ impl Controller {
                 }
             })
             .collect();
-        // Eligible first, then alphabetically; stable within each bucket.
         rows.sort_by(|a, b| {
             a.reason
                 .is_some()

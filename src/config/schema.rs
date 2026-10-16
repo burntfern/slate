@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// On-disk settings version. Bump when the shape changes and add a migration.
 pub const SCHEMA_VERSION: u32 = 1;
 
-/// Resolved settings handed to the app.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default = "schema_version")]
@@ -16,7 +14,6 @@ pub struct Settings {
     pub tabs: Tabs,
 }
 
-/// Tab-strip preferences.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tabs {
     #[serde(default = "yes")]
@@ -25,7 +22,6 @@ pub struct Tabs {
     pub count_badge: bool,
     #[serde(default = "yes")]
     pub hover_preview: bool,
-    /// When false the tab strip is hidden (the +/chevron/controls remain).
     #[serde(default = "yes")]
     pub show_bar: bool,
 }
@@ -52,18 +48,16 @@ impl Default for Settings {
     }
 }
 
-/// A named snapshot of the tabs that were open in the host. Windows are stored
-/// by executable path plus a title hint, never by HWND (an HWND is meaningless
-/// across runs).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedSet {
+    #[serde(default)]
+    pub id: u64,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub tabs: Vec<SavedTab>,
 }
 
-/// One tab inside a [`SavedSet`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedTab {
     #[serde(default)]
@@ -74,7 +68,6 @@ pub struct SavedTab {
     pub title_hint: String,
 }
 
-/// The persisted collection of saved tab sets (`slate\sets.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedSets {
     #[serde(default = "schema_version")]
@@ -130,6 +123,7 @@ mod tests {
         let sets = SavedSets {
             schema_version: SCHEMA_VERSION,
             sets: vec![SavedSet {
+                id: 1,
                 name: "Work".into(),
                 tabs: vec![SavedTab {
                     exe_path: "C:\\x\\chrome.exe".into(),

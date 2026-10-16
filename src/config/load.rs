@@ -4,8 +4,6 @@ use serde::Deserialize;
 
 use super::schema::{SavedSet, SavedSets, Settings, SCHEMA_VERSION};
 
-/// A file whose keys are all optional, so a partial file only overrides what it
-/// actually sets. Used for both the shared and the app file.
 #[derive(Debug, Default, Deserialize)]
 struct PartialSettings {
     theme: Option<String>,
@@ -21,8 +19,6 @@ struct PartialTabs {
     show_bar: Option<bool>,
 }
 
-// --- paths -------------------------------------------------------------------
-
 fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
@@ -30,12 +26,10 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
-/// `%USERPROFILE%\.burntfern` — shared root for every burntfern app.
 pub fn burntfern_root() -> PathBuf {
     home_dir().join(".burntfern")
 }
 
-/// Slate's own directory: `.burntfern\slate`.
 pub fn app_dir() -> PathBuf {
     burntfern_root().join("slate")
 }
@@ -48,7 +42,6 @@ pub fn settings_path() -> PathBuf {
     app_dir().join("settings.json")
 }
 
-/// `slate\sets.json` — the saved tab sets.
 pub fn sets_path() -> PathBuf {
     app_dir().join("sets.json")
 }
@@ -61,7 +54,6 @@ pub fn backups_dir() -> PathBuf {
     app_dir().join("backups")
 }
 
-/// The repo/install `configs\` directory holding the default templates.
 fn template_dir() -> Option<PathBuf> {
     let beside_exe = std::env::current_exe()
         .ok()
@@ -73,8 +65,6 @@ fn template_dir() -> Option<PathBuf> {
         .find(|dir| dir.is_dir())
 }
 
-/// Create the directory tree and seed missing files from the repo templates
-/// (falling back to baked defaults). Safe to call every start.
 pub fn ensure() {
     for dir in [burntfern_root(), app_dir(), logs_dir(), backups_dir()] {
         let _ = std::fs::create_dir_all(dir);
@@ -90,7 +80,6 @@ pub fn ensure() {
     }
 }
 
-/// Writes `path` from `configs\<template>` if present, else from `seed_content`.
 trait Seed {
     fn content(&self) -> String;
 }
@@ -134,7 +123,6 @@ fn seed(template_rel: &str, dest: &Path, fallback: &dyn Seed) {
     let _ = std::fs::write(dest, fallback.content());
 }
 
-/// Load settings, merging defaults <- shared `config.json` <- `slate\settings.json`.
 pub fn load() -> Settings {
     let mut merged = Settings::default();
     if let Some(partial) = read_partial(&shared_config_path()) {
@@ -146,8 +134,6 @@ pub fn load() -> Settings {
     merged
 }
 
-/// Load the saved tab sets. A missing file yields an empty set; a corrupt one is
-/// backed up and treated as empty rather than crashing.
 pub fn load_sets() -> SavedSets {
     let path = sets_path();
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -162,8 +148,6 @@ pub fn load_sets() -> SavedSets {
     }
 }
 
-/// Parse `sets.json`, keeping every well-formed set and skipping bad entries so a
-/// single malformed set never drops the others.
 fn parse_sets(value: serde_json::Value) -> SavedSets {
     let value = migrate(value);
     let mut out = SavedSets::default();
@@ -176,10 +160,22 @@ fn parse_sets(value: serde_json::Value) -> SavedSets {
             .filter_map(|item| serde_json::from_value::<SavedSet>(item.clone()).ok())
             .collect();
     }
+    assign_ids(&mut out.sets);
     out
 }
 
-/// Read one file into its partial form; a corrupt file is backed up and ignored.
+fn assign_ids(sets: &mut [SavedSet]) {
+    let mut used: Vec<u64> = Vec::with_capacity(sets.len());
+    let mut next = sets.iter().map(|s| s.id).max().unwrap_or(0) + 1;
+    for set in sets.iter_mut() {
+        if set.id == 0 || used.contains(&set.id) {
+            set.id = next;
+            next += 1;
+        }
+        used.push(set.id);
+    }
+}
+
 fn read_partial(path: &Path) -> Option<PartialSettings> {
     let text = std::fs::read_to_string(path).ok()?;
     let value: serde_json::Value = match serde_json::from_str(&text) {
@@ -198,7 +194,6 @@ fn read_partial(path: &Path) -> Option<PartialSettings> {
     }
 }
 
-/// Overlay a partial file onto resolved settings (only set keys win).
 fn apply(settings: &mut Settings, partial: PartialSettings) {
     if let Some(theme) = partial.theme {
         settings.theme = theme;
@@ -222,10 +217,7 @@ fn apply(settings: &mut Settings, partial: PartialSettings) {
     }
 }
 
-/// Bring an older on-disk shape forward. Pure: no IO, unit-tested.
 fn migrate(mut value: serde_json::Value) -> serde_json::Value {
-    // Valid JSON that is not an object (a bare number/string/array/null) has no
-    // keys to migrate; the caller's deserialize step rejects it and falls back.
     if !value.is_object() {
         return value;
     }
@@ -236,12 +228,9 @@ fn migrate(mut value: serde_json::Value) -> serde_json::Value {
     if version < 1 {
         value["schema_version"] = SCHEMA_VERSION.into();
     }
-    // Future: `if version < 2 { ... }`.
     value
 }
 
-/// Move a corrupt file into `backups\` with a timestamp, so it is preserved but
-/// no longer loaded. Best-effort.
 fn backup(path: &Path) {
     let Some(name) = path.file_name() else {
         return;
@@ -276,9 +265,9 @@ mod tests {
             },
         );
         assert_eq!(s.theme, "dark");
-        assert_eq!(s.accent, "blue"); // untouched
-        assert!(!s.tabs.icons); // overridden
-        assert!(s.tabs.count_badge); // untouched
+        assert_eq!(s.accent, "blue");
+        assert!(!s.tabs.icons);
+        assert!(s.tabs.count_badge);
     }
 
     #[test]
@@ -309,7 +298,6 @@ mod tests {
 
     #[test]
     fn migrate_leaves_non_object_untouched() {
-        // Valid JSON of the wrong shape must not panic during migration.
         assert_eq!(migrate(serde_json::json!(123)).as_u64(), Some(123));
         assert!(migrate(serde_json::json!(null)).is_null());
     }
@@ -328,5 +316,20 @@ mod tests {
         let sets = parse_sets(value);
         let names: Vec<_> = sets.sets.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Good", "AlsoGood"]);
+    }
+
+    #[test]
+    fn parse_sets_assigns_unique_ids() {
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "sets": [
+                { "name": "A" },
+                { "id": 5, "name": "B" },
+                { "id": 5, "name": "C" }
+            ]
+        });
+        let sets = parse_sets(value);
+        let ids: Vec<u64> = sets.sets.iter().map(|s| s.id).collect();
+        assert_eq!(ids, [6, 5, 7]);
     }
 }

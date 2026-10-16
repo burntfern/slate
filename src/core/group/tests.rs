@@ -27,7 +27,6 @@ fn add_window_is_idempotent_across_groups() {
     let g1 = s.create_group(vec![]);
     let g2 = s.create_group(vec![]);
     assert_eq!(s.add_window(g1, win(100, "a.exe", "A")), Effect::Applied);
-    // same hwnd again — no-op, even in the other group
     assert_eq!(s.add_window(g2, win(100, "a.exe", "A")), Effect::Noop);
     assert_eq!(s.group(g1).unwrap().tabs.len(), 1);
     assert_eq!(s.group(g2).unwrap().tabs.len(), 0);
@@ -62,7 +61,6 @@ fn window_destroyed_clears_tab_and_reactivates() {
     assert_eq!(group.tabs.len(), 1);
     assert_eq!(group.tabs[0].window.hwnd, 200);
     assert_eq!(group.active, Some(group.tabs[0].id));
-    // second event for the same hwnd — idempotent
     assert_eq!(s.window_destroyed(active_hwnd), Effect::Noop);
 }
 
@@ -102,7 +100,7 @@ fn set_active_rejects_unknown_tab() {
     let g = s.create_group(vec![win(100, "a.exe", "A")]);
     assert_eq!(s.set_active(g, TabId(42)), Effect::Noop);
     let tab = s.group(g).unwrap().tabs[0].id;
-    assert_eq!(s.set_active(g, tab), Effect::Noop); // already active
+    assert_eq!(s.set_active(g, tab), Effect::Noop);
     let mut s2 = GroupSet::new();
     let g2 = s2.create_group(vec![win(1, "a", "A"), win(2, "b", "B")]);
     let other = s2.group(g2).unwrap().tabs[1].id;

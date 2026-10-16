@@ -2,12 +2,11 @@ use gpui::Context;
 
 use super::dto::{Cmd, SavedPrompt, TabMenu};
 use super::Controller;
-use crate::win::{enumerate_windows, install_window_icon};
+use crate::win::{activate_window, enumerate_windows, install_window_icon};
 
 impl Controller {
-    /// Apply a command. Called from the UI thread; `cx` is the controller's
-    /// context so the host view re-renders after every change.
     pub fn dispatch(&mut self, cmd: Cmd, cx: &mut Context<Self>) {
+        self.invalidate_info();
         self.drain_events();
         match cmd {
             Cmd::Refresh => self.windows = enumerate_windows(),
@@ -22,7 +21,12 @@ impl Controller {
                 self.worker.install_move_tracker(hwnd);
             }
             Cmd::SelectTab { group, tab } => self.select_tab(group, tab),
-            Cmd::Ungroup { group, tab } => self.ungroup(group, tab),
+            Cmd::Ungroup { group, tab } => {
+                if let Some(hwnd) = self.hwnd_of_tab(group, tab) {
+                    self.ungroup(group, tab);
+                    activate_window(hwnd);
+                }
+            }
             Cmd::CloseTab { group, tab } => self.close_tab(group, tab),
             Cmd::DetachTabOut {
                 from,
@@ -35,16 +39,17 @@ impl Controller {
             Cmd::SetOverlay(open) => self.overlay = open,
             Cmd::ToggleOverlay => self.overlay = !self.overlay,
             Cmd::SetTabMenu(open) => {
-                self.tab_menu_open = open;
                 if open {
                     self.close_other_dropdowns();
                 }
+                self.tab_menu_open = open;
             }
             Cmd::ToggleTabMenu => {
-                self.tab_menu_open = !self.tab_menu_open;
-                if self.tab_menu_open {
+                let open = !self.tab_menu_open;
+                if open {
                     self.close_other_dropdowns();
                 }
+                self.tab_menu_open = open;
             }
             Cmd::AddWindow { hwnd } => self.add_window(hwnd),
             Cmd::CloseOtherTabs { group, tab } => self.close_other_tabs(group, tab),
@@ -77,17 +82,17 @@ impl Controller {
                 self.saved_menu_open = false;
                 self.saved_prompt = Some(SavedPrompt::Save);
             }
-            Cmd::BeginRenameSet { index } => {
-                if index < self.saved_sets.len() {
+            Cmd::BeginRenameSet { id } => {
+                if self.saved_sets.iter().any(|s| s.id == id) {
                     self.saved_menu_open = false;
-                    self.saved_prompt = Some(SavedPrompt::Rename(index));
+                    self.saved_prompt = Some(SavedPrompt::Rename(id));
                 }
             }
             Cmd::CancelSavedPrompt => self.saved_prompt = None,
             Cmd::CommitSaveSet { name } => self.commit_save_set(name),
-            Cmd::CommitRenameSet { index, name } => self.commit_rename_set(index, name),
-            Cmd::RestoreSet { index } => self.restore_set(index),
-            Cmd::DeleteSet { index } => self.delete_set(index),
+            Cmd::CommitRenameSet { id, name } => self.commit_rename_set(id, name),
+            Cmd::RestoreSet { id } => self.restore_set(id),
+            Cmd::DeleteSet { id } => self.delete_set(id),
             Cmd::ToggleTabBadge => self.toggle_tab_badge(),
             Cmd::ToggleHoverPreview => self.toggle_hover_preview(),
             Cmd::ToggleTheme => self.toggle_theme(cx),
@@ -105,10 +110,10 @@ impl Controller {
         cx.notify();
     }
 
-    /// Only one dropdown is open at a time.
     pub(super) fn close_other_dropdowns(&mut self) {
         self.picker_open = false;
         self.saved_menu_open = false;
+        self.tab_menu_open = false;
         self.tab_menu = None;
     }
 }

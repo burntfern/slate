@@ -1,4 +1,3 @@
-// No console window in a GUI build; the `--janitor` child is spawned hidden.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
@@ -35,7 +34,6 @@ fn main() {
             let bounds = Bounds::centered(None, size(px(1100.0), px(720.0)), cx);
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                // Hide the native title bar so only Ely's drawn controls remain.
                 titlebar: Some(TitlebarOptions {
                     title: Some("Slate".into()),
                     appears_transparent: true,

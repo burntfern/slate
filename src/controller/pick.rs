@@ -9,8 +9,6 @@ use crate::win::{
 };
 
 impl Controller {
-    /// Arm pick mode: refresh the window list, capture TAB/Esc system-wide, and
-    /// poll the cursor until the user commits or cancels.
     pub(super) fn begin_pick(&mut self, cx: &mut Context<Self>) {
         self.windows = enumerate_windows();
         self.end_pick();
@@ -38,7 +36,6 @@ impl Controller {
         .detach();
     }
 
-    /// One polling tick of pick mode. Returns true once the pick has ended.
     fn poll_pick(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
         if !self.picking || generation != self.pick_gen {
             return true;
@@ -67,8 +64,6 @@ impl Controller {
         false
     }
 
-    /// Move the pick ring onto the hovered window (or hide it when nothing
-    /// eligible is under the cursor).
     fn update_highlight(&self) {
         let Some(highlight) = self.highlight.as_ref() else {
             return;
@@ -79,8 +74,6 @@ impl Controller {
         }
     }
 
-    /// A dragged window we could host: not our host, not already a member, and
-    /// eligible by the same filter the picker uses.
     pub(super) fn trackable_drag(&self, hwnd: isize) -> bool {
         if Some(hwnd) == self.host_hwnd || self.styling.contains_key(&hwnd) {
             return false;
@@ -91,8 +84,6 @@ impl Controller {
             .is_some_and(|w| !is_blacklisted(&w.class) && !w.elevated)
     }
 
-    /// True while the drag is a real drop onto the host: Ctrl held and the
-    /// dragged window overlaps the host's content area.
     fn drag_target_ok(&self, hwnd: isize) -> bool {
         if !ctrl_held() {
             return false;
@@ -109,8 +100,6 @@ impl Controller {
         wx < hx + hw && wx + ww > hx && wy < hy + hh && wy + wh > hy
     }
 
-    /// Track the current drag (called each `tick`): keep the drop ring in step
-    /// with Ctrl and the window's position, and forget a window that vanished.
     pub(super) fn pump_drag(&mut self) {
         let Some(hwnd) = self.drag else {
             return;
@@ -128,8 +117,6 @@ impl Controller {
         }
     }
 
-    /// Ring the host's content area while a Ctrl-drag drop is valid; otherwise
-    /// take the ring down.
     pub(super) fn update_drag_highlight(&mut self) {
         if self.drag_active {
             if self.highlight.is_none() {
@@ -145,7 +132,6 @@ impl Controller {
         }
     }
 
-    /// Add the window the pick settled on, if any, then leave pick mode.
     fn commit_pick(&mut self) {
         let target = self.hovered.take();
         self.end_pick();
@@ -154,7 +140,6 @@ impl Controller {
         }
     }
 
-    /// Leave pick mode and drop the keyboard hook. Leaves no status behind.
     pub(super) fn end_pick(&mut self) {
         self.picking = false;
         self.hovered = None;
@@ -162,7 +147,6 @@ impl Controller {
         if let Some(highlight) = self.highlight.as_ref() {
             highlight.hide();
         }
-        // Invalidate any poll task still waiting on a timer.
         self.pick_gen = self.pick_gen.wrapping_add(1);
     }
 }

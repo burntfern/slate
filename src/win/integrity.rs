@@ -1,14 +1,9 @@
-//! Elevation check: a process running elevated holds a full token.
-//! Used to disable grouping of admin windows in the picker (spec 02).
-
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Threading::{
     OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-/// True if the process owning this pid runs at a higher integrity level
-/// (admin). Slate never attempts to control such windows.
 pub fn is_elevated(pid: u32) -> bool {
     unsafe { elevated_inner(pid).unwrap_or(false) }
 }

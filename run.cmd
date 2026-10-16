@@ -1,4 +1,4 @@
 @echo off
-cd /d D:\github-desktop\burntfern\slate
+cd /d "%~dp0"
 set SLATE_DEBUG=1
-"D:\github-desktop\burntfern\slate\target\debug\slate.exe" > "D:\github-desktop\burntfern\slate\slate.log" 2>&1
+"%~dp0..\target\debug\slate.exe" > "%~dp0slate.log" 2>&1

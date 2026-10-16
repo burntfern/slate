@@ -6,7 +6,6 @@ use crate::win::{
 };
 
 impl Controller {
-    /// Register a running window as a tab in the active group.
     pub(super) fn add_window(&mut self, hwnd: isize) {
         let Some(host) = self.host_hwnd else {
             return;
@@ -20,8 +19,6 @@ impl Controller {
         if self.groups.contains_window(hwnd) {
             return;
         }
-        // Register the window first; only touch the group state once it is really
-        // ours, so a failed registration never leaves an empty active group.
         let Some(state) = register_member(host, hwnd) else {
             return;
         };
@@ -44,7 +41,6 @@ impl Controller {
         }
     }
 
-    /// Show the selected tab's member; siblings stay hidden.
     pub(super) fn select_tab(&mut self, group: GroupId, tab: TabId) {
         self.groups.set_active(group, tab);
         if let Some(hwnd) = self.hwnd_of_tab(group, tab) {
@@ -52,8 +48,6 @@ impl Controller {
         }
     }
 
-    /// Apply a global shortcut to the active group. Returns true when it changed
-    /// anything (so the caller re-renders / re-syncs the worker).
     pub(super) fn apply_shortcut(&mut self, shortcut: Shortcut) -> bool {
         let Some(group) = self.active_group else {
             return false;
@@ -100,7 +94,6 @@ impl Controller {
         }
     }
 
-    /// Remove a tab and restore its window to normal. Never closes the app.
     pub(super) fn ungroup(&mut self, group: GroupId, tab: TabId) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;
@@ -115,8 +108,6 @@ impl Controller {
         self.groups.remove_tab(group, tab);
     }
 
-    /// Detach the tab at `from` in the active group and drop its window at the
-    /// given screen position (the drag-out gesture).
     pub(super) fn detach_tab_out(&mut self, from: usize, screen_x: f32, screen_y: f32) {
         let Some(group) = self.active_group else {
             return;
@@ -132,8 +123,6 @@ impl Controller {
         self.detach_tab_at(group, tab, screen_x, screen_y);
     }
 
-    /// Ungroup `tab` and move its restored window so the cursor lands near its
-    /// top edge, keeping the size it had before it was hosted.
     fn detach_tab_at(&mut self, group: GroupId, tab: TabId, screen_x: f32, screen_y: f32) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;
@@ -151,7 +140,6 @@ impl Controller {
         activate_window(hwnd);
     }
 
-    /// Set (or clear) a tab's accent color. Session-only, keyed by hwnd.
     pub(super) fn set_tab_color(&mut self, group: GroupId, tab: TabId, color: Option<usize>) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;
@@ -166,9 +154,6 @@ impl Controller {
         }
     }
 
-    /// Post `WM_CLOSE` and let the app quit on its own terms. The member is
-    /// released first so the host stops pinning it; the destroy event then clears
-    /// the tab via `window_gone`.
     pub(super) fn close_tab(&mut self, group: GroupId, tab: TabId) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;
@@ -179,7 +164,6 @@ impl Controller {
         close_window(hwnd);
     }
 
-    /// Reorder a tab within its group by index.
     pub(super) fn reorder(&mut self, group: GroupId, from: usize, to: usize) {
         let Some(tab) = self
             .groups
@@ -192,7 +176,6 @@ impl Controller {
         self.groups.reorder(group, tab, to);
     }
 
-    /// Close every tab in the group except `keep` (each window is restored).
     pub(super) fn close_other_tabs(&mut self, group: GroupId, keep: TabId) {
         let Some(g) = self.groups.group(group) else {
             return;
@@ -208,7 +191,6 @@ impl Controller {
         }
     }
 
-    /// Ungroup every tab positioned to the right of `tab`.
     pub(super) fn close_tabs_to_right(&mut self, group: GroupId, tab: TabId) {
         let Some(g) = self.groups.group(group) else {
             return;
@@ -222,7 +204,6 @@ impl Controller {
         }
     }
 
-    /// Ungroup every tab positioned to the left of `tab`.
     pub(super) fn close_tabs_to_left(&mut self, group: GroupId, tab: TabId) {
         let Some(g) = self.groups.group(group) else {
             return;
@@ -236,7 +217,6 @@ impl Controller {
         }
     }
 
-    /// Set (or clear, when empty) a tab's display-title override.
     pub(super) fn rename_tab(&mut self, group: GroupId, tab: TabId, title: String) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;

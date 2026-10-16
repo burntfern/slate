@@ -1,7 +1,3 @@
-//! Host-window controller. Commands flow `UI → Cmd → controller → Win32 → core`:
-//! the controller enumerates windows, registers members with the hosting engine,
-//! keeps `GroupSet` state, and publishes the host layout to the reposition worker.
-
 mod dispatch;
 mod dto;
 mod events;
@@ -18,6 +14,7 @@ pub use dto::{
 
 use ely_gpui_component::feedback::Toaster;
 use gpui::{AppContext, Context, Entity, RenderImage};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +27,6 @@ use crate::win::{
     KeyboardCapture, ShortcutCapture, StylingState, WinEventPump,
 };
 
-/// Hover-card open/close delay, matching ely's `HoverCard`.
 pub(super) const PREVIEW_OPEN_MS: u64 = 500;
 pub(super) const PREVIEW_LINGER_MS: u64 = 200;
 
@@ -48,7 +44,6 @@ pub struct Controller {
     hovered: Option<isize>,
     pick_gen: u64,
     capture: Option<KeyboardCapture>,
-    /// Ring drawn over the window the pointer is on while picking or dragging.
     highlight: Option<Highlight>,
     pub settings: config::Settings,
     icons: HashMap<isize, Option<Arc<RenderImage>>>,
@@ -57,29 +52,32 @@ pub struct Controller {
     picker_open: bool,
     picker_rows: Vec<PickerRow>,
     saved_sets: Vec<config::SavedSet>,
+    saved_avail: HashMap<u64, usize>,
     saved_menu_open: bool,
     saved_prompt: Option<SavedPrompt>,
     tab_menu: Option<TabMenu>,
     renaming: Option<(GroupId, TabId)>,
-    /// Display-title overrides for renamed tabs, keyed by hwnd. Takes precedence
-    /// over the live window title and survives retitle events.
     rename_overrides: HashMap<isize, String>,
-    /// Per-tab accent colors (chart-hue index), keyed by hwnd. Session-only.
     tab_colors: HashMap<isize, usize>,
     hover_preview: Option<HoverPreview>,
     hover_tab: Option<TabId>,
     card_hovered: bool,
-    /// Bumped on every hover change to cancel stale open/linger timers.
     preview_gen: u64,
-    /// Last captured frame per window, so a hidden tab still shows something.
     snapshots: HashMap<isize, Arc<RenderImage>>,
     shortcuts: Option<ShortcutCapture>,
     tray: Option<crate::win::TrayIcon>,
-    /// The foreign window currently being dragged, watched for the Ctrl-drag
-    /// "add as tab" gesture.
     drag: Option<isize>,
     drag_active: bool,
+    info_cache: RefCell<Option<Arc<HostInfo>>>,
+    index_cache: RefCell<Option<Index>>,
     _pump: Option<WinEventPump>,
+}
+
+#[derive(Default)]
+struct Index {
+    generation: u64,
+    by_hwnd: HashMap<isize, (GroupId, TabId)>,
+    by_tab: HashMap<(GroupId, TabId), isize>,
 }
 
 impl Controller {
@@ -107,6 +105,7 @@ impl Controller {
             picker_open: false,
             picker_rows: Vec::new(),
             saved_sets: config::load_sets().sets,
+            saved_avail: HashMap::new(),
             saved_menu_open: false,
             saved_prompt: None,
             tab_menu: None,
@@ -122,6 +121,8 @@ impl Controller {
             tray: crate::win::TrayIcon::start(),
             drag: None,
             drag_active: false,
+            info_cache: RefCell::new(None),
+            index_cache: RefCell::new(None),
             _pump: WinEventPump::install(),
             toaster,
         };
@@ -130,8 +131,6 @@ impl Controller {
         controller
     }
 
-    /// Drain OS window events that arrive while the user does nothing inside
-    /// Slate, so the strip stays live between commands.
     fn start_event_pump(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
@@ -148,6 +147,7 @@ impl Controller {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_info();
         let mut changed = self.drain_events();
         let shortcuts = self
             .shortcuts
@@ -164,8 +164,20 @@ impl Controller {
         }
     }
 
-    /// Snapshot for rendering the tab strip.
-    pub fn host_info(&self) -> HostInfo {
+    pub fn host_info(&self) -> Arc<HostInfo> {
+        if let Some(info) = self.info_cache.borrow().clone() {
+            return info;
+        }
+        let info = Arc::new(self.build_host_info());
+        self.info_cache.replace(Some(info.clone()));
+        info
+    }
+
+    fn invalidate_info(&mut self) {
+        self.info_cache.replace(None);
+    }
+
+    fn build_host_info(&self) -> HostInfo {
         let group = self.active_group.and_then(|id| self.groups.group(id));
         HostInfo {
             group: group.map(|g| g.id),
@@ -202,9 +214,10 @@ impl Controller {
                 .saved_sets
                 .iter()
                 .map(|s| SavedSetInfo {
+                    id: s.id,
                     name: s.name.clone(),
                     count: s.tabs.len(),
-                    available: self.set_available(s),
+                    available: self.saved_avail.get(&s.id).copied().unwrap_or(0),
                 })
                 .collect(),
             saved_prompt: self.saved_prompt,
@@ -216,20 +229,13 @@ impl Controller {
         }
     }
 
-    /// The toaster the host view renders the pick hint through. Shared so the
-    /// view can observe arrivals/expiries and re-render.
     pub fn toaster(&self) -> Entity<Toaster> {
         self.toaster.clone()
     }
 
-    /// Restore every hosted window to normal, then stop the worker. Safe to call
-    /// more than once; never leaves a member hidden.
     fn shutdown(&mut self) {
         self.end_pick();
         self.hide_hover_preview();
-        // Remember the member that was on screen so it can be re-focused once it
-        // is restored; a restored window is missing from the taskbar and unfocused
-        // until re-activated, which reads as "the window didn't come back".
         let restore_focus = self.active_group.and_then(|g| self.active_hwnd(g));
         for (hwnd, state) in self.styling.drain() {
             unregister_member(hwnd, &state);
@@ -261,21 +267,36 @@ impl Controller {
         self.hwnd_of_tab(group, tab)
     }
 
+    fn index(&self) -> std::cell::Ref<'_, Index> {
+        let mut cache = self.index_cache.borrow_mut();
+        let stale = cache
+            .as_ref()
+            .map(|i| i.generation != self.groups.generation())
+            .unwrap_or(true);
+        if stale {
+            let mut index = Index {
+                generation: self.groups.generation(),
+                ..Default::default()
+            };
+            for group in self.groups.groups() {
+                for tab in &group.tabs {
+                    index.by_hwnd.insert(tab.window.hwnd, (group.id, tab.id));
+                    index.by_tab.insert((group.id, tab.id), tab.window.hwnd);
+                }
+            }
+            *cache = Some(index);
+        }
+        drop(cache);
+        std::cell::Ref::map(self.index_cache.borrow(), |c| {
+            c.as_ref().expect("index cache populated")
+        })
+    }
+
     fn hwnd_of_tab(&self, group: GroupId, tab: TabId) -> Option<isize> {
-        self.groups
-            .group(group)?
-            .tabs
-            .iter()
-            .find(|t| t.id == tab)
-            .map(|t| t.window.hwnd)
+        self.index().by_tab.get(&(group, tab)).copied()
     }
 
     fn tab_of_hwnd(&self, hwnd: isize) -> Option<(GroupId, TabId)> {
-        self.groups.groups().iter().find_map(|g| {
-            g.tabs
-                .iter()
-                .find(|t| t.window.hwnd == hwnd)
-                .map(|t| (g.id, t.id))
-        })
+        self.index().by_hwnd.get(&hwnd).copied()
     }
 }

@@ -1,7 +1,3 @@
-//! Host tab bar. A copy of ely's `TabBar` with two changes Slate needs: tabs
-//! can show a host's real window icon (an `Arc<RenderImage>`), and each tab
-//! carries a right-click context hook (the title bar owns the `+` picker).
-
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,22 +13,17 @@ use gpui::{
     FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
     RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
-/// What to draw at the start of a tab.
 #[derive(Clone)]
 pub enum TabIcon {
-    /// A host's real icon.
     Real(Arc<RenderImage>),
-    /// A generic glyph (icons disabled, or none available).
     Glyph(IconName),
 }
 
-/// One host tab.
 #[derive(Clone)]
 pub struct SlateTab {
     id: SharedString,
     title: SharedString,
     icon: TabIcon,
-    /// Accent color drawn as a bar along the tab's top edge. `None` draws none.
     accent: Option<Hsla>,
 }
 
@@ -46,15 +37,12 @@ impl SlateTab {
         }
     }
 
-    /// The colored top edge for this tab.
     pub fn accent(mut self, color: Option<Hsla>) -> Self {
         self.accent = color;
         self
     }
 }
 
-/// A tab being dragged. Public so a drop target outside the strip (e.g. the host
-/// content area) can accept a drag-out and detach the tab's window.
 #[derive(Clone)]
 pub struct TabDrag {
     pub owner: EntityId,
@@ -64,11 +52,8 @@ pub struct TabDrag {
 type OnTab = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 type OnReorder = Rc<dyn Fn(usize, usize, &mut Window, &mut App)>;
 type OnContext = Rc<dyn Fn(&SharedString, Point<Pixels>, &mut Window, &mut App)>;
-/// Reports a tab hover changing, with the tab's bounds in window space (so a
-/// caller can anchor something below it, e.g. a hover preview).
 type OnTabHover = Rc<dyn Fn(&SharedString, bool, Bounds<Pixels>, &mut Window, &mut App)>;
 
-/// Browser-style tabs across the top of the host window.
 #[derive(IntoElement)]
 pub struct SlateTabBar {
     id: ElementId,
@@ -121,7 +106,6 @@ impl SlateTabBar {
         self
     }
 
-    /// Lets tabs drag; reports `(from, to)` indexes on drop.
     pub fn on_reorder(
         mut self,
         handler: impl Fn(usize, usize, &mut Window, &mut App) + 'static,
@@ -130,8 +114,6 @@ impl SlateTabBar {
         self
     }
 
-    /// Reports a right-click on a tab, with the window-space position of the
-    /// press so a context menu can open exactly there.
     pub fn on_context(
         mut self,
         handler: impl Fn(&SharedString, Point<Pixels>, &mut Window, &mut App) + 'static,
@@ -140,7 +122,6 @@ impl SlateTabBar {
         self
     }
 
-    /// Reports a tab's hover changing, with its window-space bounds.
     pub fn on_tab_hover(
         mut self,
         handler: impl Fn(&SharedString, bool, Bounds<Pixels>, &mut Window, &mut App) + 'static,
@@ -156,11 +137,6 @@ impl RenderOnce for SlateTabBar {
             .use_keyed_state(self.id.clone(), cx, |_, _| ())
             .entity_id();
         let theme = cx.theme();
-        // Tabs share the bar's width: they grow to `wide` when there is room and
-        // shrink together down to `narrow` as more open, exactly like ely's
-        // default `TabBar`. The bar itself is laid out at its natural content
-        // width (`n * wide` plus the gaps) so the host's `ScrollArea` can clip
-        // and scroll it once the tabs no longer fit the title bar.
         let (narrow, wide) = theme.tab_width();
         let (rem, gap) = (window.rem_size(), px(4.0));
         let n = self.tabs.len();
@@ -170,17 +146,12 @@ impl RenderOnce for SlateTabBar {
         let nudge = motion::NUDGE;
         let tabs = self.tabs.into_iter().enumerate().map(|(ix, tab)| {
             let hover_cb = self.on_tab_hover.clone();
-            // Measures this tab's bounds each frame so a hover report can anchor
-            // below it (a plain `on_hover` carries no geometry). Created before
-            // `cx.theme()` so the borrow of `cx` doesn't overlap.
             let hover_bounds =
                 window.use_keyed_state(("slate-tab-hover", ix), cx, |_, _| Bounds::default());
             let theme = cx.theme();
             let colors = &theme.colors;
             let selected = self.selected.as_ref() == Some(&tab.id);
             let accent = tab.accent;
-            // An accented tab is washed with a light tint of its hue, not just
-            // edged — the active tab reads a touch stronger than the rest.
             let tint = accent.map(|color| color.opacity(if selected { 0.24 } else { 0.15 }));
             let group = SharedString::from(format!("window-tab-{}", tab.id));
             let (select, close, reorder, context) = (
@@ -203,10 +174,6 @@ impl RenderOnce for SlateTabBar {
                 .id(tab.id.clone())
                 .group(group.clone())
                 .flex()
-                // `flex_1` + `min_w`/`max_w`: every tab takes an equal share of
-                // the bar, growing up to `wide` and shrinking together to
-                // `narrow` as more tabs open (the label ellipsizes), instead of
-                // a fixed width that overflowed the title bar.
                 .flex_1()
                 .items_center()
                 .gap_2()
@@ -305,8 +272,6 @@ impl RenderOnce for SlateTabBar {
                         .child(Ellipsis::new(tab.title.clone())),
                 )
                 .child({
-                    // Tracks the tab's bounds (window space) for the hover
-                    // report; absolute, so it doesn't affect the layout.
                     let measure = hover_bounds.clone();
                     canvas(
                         move |bounds, window, cx| {
@@ -343,9 +308,6 @@ impl RenderOnce for SlateTabBar {
                     move |el, t| el.opacity(t).mt(nudge * (1.0 - t)),
                 )
         });
-        // Tabs are direct children of the bar (as in ely's `TabBar`); the bar is
-        // sized to its content (`content_w`) so it overflows the host's clipped
-        // `ScrollArea` instead of squeezing every tab down to `narrow`.
         div()
             .id(self.id)
             .flex()

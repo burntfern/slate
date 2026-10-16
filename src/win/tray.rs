@@ -1,11 +1,3 @@
-//! System-tray icon (no onboarding).
-//!
-//! A hidden window owns a `Shell_NotifyIcon` icon; the host's own message pump
-//! dispatches its messages (same thread, so no extra message loop). Left-click
-//! restores the host; right-click shows a small menu (Show Slate / Exit). The
-//! tray only ever *restores* or *requests close* of the host it was handed via
-//! [`TrayIcon::set_host`]; it never shows/hides members or steals focus.
-
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
@@ -21,14 +13,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::icon;
 
-/// Icon id and the callback message the shell posts to our hidden window.
 const TRAY_UID: u32 = 1;
 const TRAY_MSG: u32 = WM_APP + 1;
-/// Context-menu command ids.
 const CMD_SHOW: i32 = 1;
 const CMD_EXIT: i32 = 2;
 
-/// The host window to restore / close. Updated on each `HostReady`.
 static HOST: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 fn to_wide(s: &str) -> Vec<u16> {
@@ -36,8 +25,6 @@ fn to_wide(s: &str) -> Vec<u16> {
 }
 
 fn notify_data(hwnd: HWND, icon: HICON) -> NOTIFYICONDATAW {
-    // Safety: a zeroed NOTIFYICONDATAW is a valid "empty" record; every field we
-    // care about is set below.
     let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
     nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
     nid.hWnd = hwnd;
@@ -51,7 +38,6 @@ fn notify_data(hwnd: HWND, icon: HICON) -> NOTIFYICONDATAW {
     nid
 }
 
-/// Bring the host window back and focus it.
 fn restore_host() {
     let host = HOST.load(std::sync::atomic::Ordering::Relaxed);
     if host == 0 {
@@ -64,7 +50,6 @@ fn restore_host() {
     }
 }
 
-/// Right-click menu: Show Slate / Exit.
 unsafe fn show_menu(hwnd: HWND) {
     unsafe {
         let menu = match windows::Win32::UI::WindowsAndMessaging::CreatePopupMenu() {
@@ -87,7 +72,6 @@ unsafe fn show_menu(hwnd: HWND) {
         );
         let mut pt = windows::Win32::Foundation::POINT::default();
         let _ = GetCursorPos(&mut pt);
-        // Required so the menu dismisses correctly when clicking elsewhere.
         let _ = SetForegroundWindow(hwnd);
         let cmd = TrackPopupMenu(
             menu,
@@ -130,7 +114,6 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_DESTROY => {
             let nid = notify_data(hwnd, HICON(std::ptr::null_mut()));
-            // Safety: NIM_DELETE on a record we added is fine.
             unsafe {
                 let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
             }
@@ -140,15 +123,12 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-/// The live tray icon. Dropping it removes the icon and destroys its window.
 pub struct TrayIcon {
     hwnd: HWND,
     icon: HICON,
 }
 
 impl TrayIcon {
-    /// Create the hidden window and add the icon. Returns `None` when the OS
-    /// refuses (Slate then simply has no tray presence).
     pub fn start() -> Option<Self> {
         unsafe {
             let module = GetModuleHandleW(None).ok()?;
@@ -159,7 +139,6 @@ impl TrayIcon {
                 lpszClassName: windows::core::PCWSTR(class.as_ptr()),
                 ..Default::default()
             };
-            // Ignore "already registered": only one tray per process.
             let _ = RegisterClassW(&wc);
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE(0),
@@ -191,7 +170,6 @@ impl TrayIcon {
         }
     }
 
-    /// Record the host window so left-click can restore it and Exit can close it.
     pub fn set_host(&self, hwnd: isize) {
         HOST.store(hwnd, std::sync::atomic::Ordering::Relaxed);
     }

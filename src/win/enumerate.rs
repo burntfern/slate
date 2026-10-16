@@ -1,36 +1,39 @@
-//! Top-level window discovery. Eligibility rules from spec 02:
-//! visible, non-zero size, unowned, not a tool window, not no-activate,
-//! not cloaked, not Slate's own process (feedback-loop guard). Elevated
-//! windows are listed but flagged so the picker can disable them.
-
 use crate::core::WindowIdentity;
 use std::cell::RefCell;
-use windows::core::BOOL;
-use windows::core::PWSTR;
+use std::collections::HashMap;
+use std::path::Path;
+use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Threading::PROCESS_NAME_WIN32;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
     GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
     static FOUND: RefCell<Vec<HWND>> = const { RefCell::new(Vec::new()) };
+    static TEXT_BUF: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
+    static CLASS_BUF: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Enumerate eligible top-level windows with metadata.
+struct PidMeta {
+    exe_path: String,
+    elevated: bool,
+}
+
 pub fn enumerate_windows() -> Vec<WindowIdentity> {
     let our_pid = std::process::id();
     FOUND.with(|f| f.borrow_mut().clear());
     unsafe {
         let _ = EnumWindows(Some(enum_proc), LPARAM(0));
     }
+    let mut cache: HashMap<u32, PidMeta> = HashMap::new();
     FOUND.with(|f| {
         f.borrow()
             .iter()
-            .filter_map(|&hwnd| unsafe { metadata(hwnd, our_pid) })
+            .filter_map(|&hwnd| unsafe { metadata(hwnd, our_pid, &mut cache) })
             .collect()
     })
 }
@@ -42,12 +45,10 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, _lparam: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-/// Cheap structural eligibility test (no process queries).
 unsafe fn is_candidate(hwnd: HWND) -> bool {
     if !IsWindowVisible(hwnd).as_bool() {
         return false;
     }
-    // owned windows (dialogs, popups) are not group material
     if GetWindow(hwnd, GW_OWNER).is_ok() {
         return false;
     }
@@ -62,7 +63,6 @@ unsafe fn is_candidate(hwnd: HWND) -> bool {
     if rect.right - rect.left <= 0 || rect.bottom - rect.top <= 0 {
         return false;
     }
-    // cloaked UWP windows are invisible ghosts despite IsWindowVisible
     let mut cloaked: u32 = 0;
     let size = std::mem::size_of::<u32>() as u32;
     if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, size).is_ok()
@@ -73,64 +73,77 @@ unsafe fn is_candidate(hwnd: HWND) -> bool {
     true
 }
 
-/// Current title of a window by raw handle. Empty if the handle is gone.
 pub fn window_title(hwnd: isize) -> String {
-    unsafe { wide_to_string(&window_text(HWND(hwnd as *mut _))) }
+    unsafe { window_text(HWND(hwnd as *mut _)) }
 }
 
-unsafe fn metadata(hwnd: HWND, our_pid: u32) -> Option<WindowIdentity> {
+unsafe fn metadata(
+    hwnd: HWND,
+    our_pid: u32,
+    cache: &mut HashMap<u32, PidMeta>,
+) -> Option<WindowIdentity> {
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     if pid == 0 || pid == our_pid {
-        return None; // never group Slate's own windows
+        return None;
     }
-    let title = wide_to_string(&window_text(hwnd));
-    let class = wide_to_string(&window_class(hwnd));
-    let exe_path = process_path(pid).unwrap_or_default();
-    let exe_name = std::path::Path::new(&exe_path)
+    let title = window_text(hwnd);
+    let class = window_class(hwnd);
+    let meta = cache.entry(pid).or_insert_with(|| PidMeta {
+        exe_path: process_path(pid).unwrap_or_default(),
+        elevated: super::integrity::is_elevated(pid),
+    });
+    let exe_name = Path::new(&meta.exe_path)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| class.clone());
     Some(WindowIdentity {
         hwnd: hwnd.0 as isize,
         pid,
-        exe_path,
+        exe_path: meta.exe_path.clone(),
         exe_name,
         title,
         class,
-        elevated: super::integrity::is_elevated(pid),
+        elevated: meta.elevated,
     })
 }
 
-/// Read a window's title as a wide string.
-unsafe fn window_text(hwnd: HWND) -> Vec<u16> {
-    let mut buf = vec![0u16; 512];
-    let len = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, &mut buf);
-    if len <= 0 {
-        Vec::new()
-    } else {
-        buf.truncate(len as usize);
-        buf
-    }
+unsafe fn window_text(hwnd: HWND) -> String {
+    TEXT_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.clear();
+        buf.resize(512, 0);
+        let len = GetWindowTextW(hwnd, buf.as_mut_slice());
+        if len <= 0 {
+            String::new()
+        } else {
+            String::from_utf16_lossy(&buf[..len as usize])
+                .trim()
+                .to_string()
+        }
+    })
 }
 
-/// Read a window's class name as a wide string.
-unsafe fn window_class(hwnd: HWND) -> Vec<u16> {
-    let mut buf = vec![0u16; 256];
-    let len = GetClassNameW(hwnd, &mut buf);
-    if len <= 0 {
-        Vec::new()
-    } else {
-        buf.truncate(len as usize);
-        buf
-    }
+unsafe fn window_class(hwnd: HWND) -> String {
+    CLASS_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.clear();
+        buf.resize(256, 0);
+        let len = GetClassNameW(hwnd, buf.as_mut_slice());
+        if len <= 0 {
+            String::new()
+        } else {
+            String::from_utf16_lossy(&buf[..len as usize])
+                .trim()
+                .to_string()
+        }
+    })
 }
 
 fn wide_to_string(buf: &[u16]) -> String {
     String::from_utf16_lossy(buf).trim().to_string()
 }
 
-/// Full executable path for a pid; None if access is denied (elevated).
 fn process_path(pid: u32) -> Option<String> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
