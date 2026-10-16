@@ -12,10 +12,11 @@ use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GetCursorPos, PostMessageW,
-    RegisterClassW, SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON, MF_STRING, SW_RESTORE,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WM_APP,
-    WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
+    CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, GetCursorPos,
+    PostMessageW, RegisterClassW, SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON,
+    MF_STRING, SW_RESTORE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    WS_OVERLAPPED,
 };
 
 use super::icon;
@@ -181,6 +182,9 @@ impl TrayIcon {
             let nid = notify_data(hwnd, icon);
             if Shell_NotifyIconW(NIM_ADD, &nid).0 == 0 {
                 let _ = DestroyWindow(hwnd);
+                if !icon.is_invalid() {
+                    let _ = DestroyIcon(icon);
+                }
                 return None;
             }
             Some(Self { hwnd, icon })
@@ -199,6 +203,9 @@ impl Drop for TrayIcon {
             let nid = notify_data(self.hwnd, self.icon);
             let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
             let _ = DestroyWindow(self.hwnd);
+            if !self.icon.is_invalid() {
+                let _ = DestroyIcon(self.icon);
+            }
         }
     }
 }

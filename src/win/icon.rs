@@ -13,8 +13,9 @@ use windows::Win32::Graphics::Gdi::{
     HGDIOBJ,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, GetClassLongPtrW, GetIconInfo, SendMessageTimeoutW, SendMessageW,
-    GCLP_HICON, GCLP_HICONSM, HICON, ICONINFO, SEND_MESSAGE_TIMEOUT_FLAGS, WM_GETICON, WM_SETICON,
+    CreateIconIndirect, DestroyIcon, GetClassLongPtrW, GetIconInfo, SendMessageTimeoutW,
+    SendMessageW, GCLP_HICON, GCLP_HICONSM, HICON, ICONINFO, SEND_MESSAGE_TIMEOUT_FLAGS,
+    WM_GETICON, WM_SETICON,
 };
 
 /// A window icon decoded to top-down, 8-bit-per-channel RGBA.
@@ -50,7 +51,12 @@ pub fn install_window_icon(hwnd: isize) {
         let h = HWND(hwnd as *mut _);
         for (which, size) in [(ICON_BIG, 256u32), (ICON_SMALL, 32u32)] {
             if let Some(icon) = hicon_from_rgba(&rgba, size) {
-                SendMessageW(h, WM_SETICON, Some(WPARAM(which)), Some(LPARAM(icon)));
+                // WM_SETICON returns the previous icon, which the window no
+                // longer owns; releasing it stops a handle leak on re-install.
+                let prev = SendMessageW(h, WM_SETICON, Some(WPARAM(which)), Some(LPARAM(icon)));
+                if prev.0 != 0 {
+                    let _ = DestroyIcon(HICON(prev.0 as *mut _));
+                }
             }
         }
     }
@@ -193,7 +199,12 @@ unsafe fn decode(
 
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(Some(screen));
-    let mut rgba = dibits(mem, color, width, height)?;
+    // Clean up both DCs on the failure path; `?` here would leak them.
+    let Some(mut rgba) = dibits(mem, color, width, height) else {
+        let _ = DeleteDC(mem);
+        let _ = ReleaseDC(None, screen);
+        return None;
+    };
     let mut alpha_present = false;
     for p in rgba.chunks(4) {
         if p[3] != 0 {

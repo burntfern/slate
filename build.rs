@@ -87,13 +87,55 @@ fn main() {
 
     let rc_path = std::path::Path::new(&out_dir).join("slate.rc");
     let ico_lit = ico_path.display().to_string().replace('\\', "\\\\");
-    std::fs::write(&rc_path, format!("1 ICON \"{ico_lit}\"\n")).expect("write slate.rc");
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let (v1, v2, v3, v4) = version_quad(&version);
+    let rc = format!(
+        r#"1 ICON "{ico_lit}"
+1 VERSIONINFO
+FILEVERSION {v1},{v2},{v3},{v4}
+PRODUCTVERSION {v1},{v2},{v3},{v4}
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Slate"
+      VALUE "FileVersion", "{version}"
+      VALUE "ProductName", "Slate"
+      VALUE "ProductVersion", "{version}"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"#
+    );
+    std::fs::write(&rc_path, rc).expect("write slate.rc");
 
-    let _ = embed_resource::compile(&rc_path, embed_resource::NONE);
+    // A failed resource compile (missing/failed rc.exe) must not silently ship an
+    // icon-less binary. `manifest_optional` still tolerates a non-Windows build.
+    if let Err(err) = embed_resource::compile(&rc_path, embed_resource::NONE).manifest_optional() {
+        panic!("embed icon/version resource: {err}");
+    }
 
     // Hand the exact selected art to the crate (window icon + empty state).
     let abs = std::fs::canonicalize(&selected).unwrap_or(selected);
     println!("cargo:rustc-env=SLATE_LOGO={}", abs.display());
+}
+
+/// `x.y.z` (or any dotted form) as the four 16-bit VERSIONINFO fields.
+fn version_quad(version: &str) -> (u16, u16, u16, u16) {
+    let mut parts = version.split('.').map(|p| p.parse::<u16>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
 }
 
 /// Build the bytes of a PNG-compressed multi-size .ico from a PNG.

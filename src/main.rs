@@ -1,3 +1,6 @@
+// No console window in a GUI build; the `--janitor` child is spawned hidden.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 #[cfg(windows)]
 mod config;
 mod core;

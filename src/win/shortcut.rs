@@ -9,7 +9,7 @@
 //! members) is in the foreground, so every other app keeps its own `Ctrl`
 //! chords untouched.
 
-use std::collections::HashSet;
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -36,19 +36,53 @@ fn queue() -> &'static Mutex<Vec<Shortcut>> {
     QUEUE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn owned() -> &'static Mutex<HashSet<isize>> {
-    static OWNED: OnceLock<Mutex<HashSet<isize>>> = OnceLock::new();
-    OWNED.get_or_init(|| Mutex::new(HashSet::new()))
+/// Upper bound on tracked Slate windows (host + hosted members).
+const MAX_OWNED: usize = 64;
+
+/// Lock-free set of "Slate is focused" windows. The low-level keyboard hook runs
+/// on every keydown system-wide, so membership is read without taking a lock.
+struct OwnedSet {
+    len: AtomicUsize,
+    items: [AtomicIsize; MAX_OWNED],
+}
+
+impl OwnedSet {
+    const fn new() -> Self {
+        Self {
+            len: AtomicUsize::new(0),
+            items: [const { AtomicIsize::new(0) }; MAX_OWNED],
+        }
+    }
+
+    fn set(&self, hwnds: impl IntoIterator<Item = isize>) {
+        let mut n = 0;
+        for hwnd in hwnds {
+            if n == MAX_OWNED {
+                break;
+            }
+            self.items[n].store(hwnd, Ordering::Relaxed);
+            n += 1;
+        }
+        // Publish the count last so a reader never sees a slot not yet written.
+        self.len.store(n, Ordering::Release);
+    }
+
+    fn contains(&self, hwnd: isize) -> bool {
+        let n = self.len.load(Ordering::Acquire).min(MAX_OWNED);
+        (0..n).any(|i| self.items[i].load(Ordering::Relaxed) == hwnd)
+    }
+}
+
+fn owned() -> &'static OwnedSet {
+    static OWNED: OwnedSet = OwnedSet::new();
+    &OWNED
 }
 
 /// The windows that count as "Slate is focused": the host plus every member.
 /// Updated on each layout sync; a chord is only consumed while the foreground
 /// window is one of these.
 pub fn set_owned(hwnds: impl IntoIterator<Item = isize>) {
-    if let Ok(mut set) = owned().lock() {
-        set.clear();
-        set.extend(hwnds);
-    }
+    owned().set(hwnds);
 }
 
 fn held(key: VIRTUAL_KEY) -> bool {
@@ -67,30 +101,28 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         if message == WM_KEYDOWN || message == WM_SYSKEYDOWN {
             // Safety: the OS passes a KBDLLHOOKSTRUCT for WH_KEYBOARD_LL.
             let keyboard = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-            // Alt+Tab and friends belong to Windows, not us.
-            let alt_held = keyboard.flags.0 & LLKHF_ALTDOWN.0 != 0;
-            if held(VK_CONTROL) && !alt_held {
-                let vk = keyboard.vkCode as u16;
-                let shortcut = match vk {
-                    v if v == VK_TAB.0 => Some(if held(VK_SHIFT) {
-                        Shortcut::PrevTab
-                    } else {
-                        Shortcut::NextTab
-                    }),
-                    v if v == VK_W.0 => Some(Shortcut::CloseTab),
-                    v if (VK_1.0..=VK_9.0).contains(&v) => {
-                        Some(Shortcut::SelectIndex((v - VK_1.0 + 1) as u8))
-                    }
-                    _ => None,
-                };
-                if let Some(shortcut) = shortcut {
+            let vk = keyboard.vkCode as u16;
+            // Cheap filter first: this hook sees every keydown system-wide, so
+            // bail before any query for keys that can never be one of our chords.
+            let chord = vk == VK_TAB.0 || vk == VK_W.0 || (VK_1.0..=VK_9.0).contains(&vk);
+            if chord {
+                // Alt+Tab and friends belong to Windows, not us.
+                let alt_held = keyboard.flags.0 & LLKHF_ALTDOWN.0 != 0;
+                if !alt_held && held(VK_CONTROL) {
+                    let shortcut = match vk {
+                        v if v == VK_TAB.0 => {
+                            if held(VK_SHIFT) {
+                                Shortcut::PrevTab
+                            } else {
+                                Shortcut::NextTab
+                            }
+                        }
+                        v if v == VK_W.0 => Shortcut::CloseTab,
+                        v => Shortcut::SelectIndex((v - VK_1.0 + 1) as u8),
+                    };
                     // Safety: `GetForegroundWindow` is a pure query.
                     let foreground = unsafe { GetForegroundWindow() }.0 as isize;
-                    let ours = owned()
-                        .lock()
-                        .map(|set| set.contains(&foreground))
-                        .unwrap_or(false);
-                    if ours {
+                    if owned().contains(foreground) {
                         if let Ok(mut queue) = queue().lock() {
                             queue.push(shortcut);
                         }

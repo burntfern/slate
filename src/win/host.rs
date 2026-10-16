@@ -10,7 +10,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
 use super::stack::scale_factor;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{
+    GetLastError, SetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WIN32_ERROR, WPARAM,
+};
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMNCRP_USEWINDOWSTYLE, DWMWA_NCRENDERING_POLICY,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND,
@@ -20,12 +22,13 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, GetClientRect, GetForegroundWindow, GetWindowLongPtrW, GetWindowPlacement,
-    GetWindowRect, IsIconic, IsWindowVisible, IsZoomed, SetWindowLongPtrW, SetWindowPlacement,
-    SetWindowPos, ShowWindow, GWLP_WNDPROC, GWL_EXSTYLE, GWL_HWNDPARENT, GWL_STYLE,
-    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSENDCHANGING,
-    SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWMINIMIZED, SW_SHOWMINNOACTIVE, SW_SHOWNA,
-    WINDOWPLACEMENT, WM_MOVE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDPROC, WS_CAPTION, WS_EX_APPWINDOW,
-    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    GetWindowRect, IsHungAppWindow, IsIconic, IsWindowVisible, IsZoomed, SetWindowLongPtrW,
+    SetWindowPlacement, SetWindowPos, ShowWindow, GWLP_WNDPROC, GWL_EXSTYLE, GWL_HWNDPARENT,
+    GWL_STYLE, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSENDCHANGING, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOWMINIMIZED,
+    SW_SHOWMINNOACTIVE, SW_SHOWNA, WINDOWPLACEMENT, WINDOW_LONG_PTR_INDEX, WM_MOVE, WM_SIZE,
+    WM_WINDOWPOSCHANGED, WNDPROC, WS_CAPTION, WS_EX_APPWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    WS_SYSMENU, WS_THICKFRAME,
 };
 
 /// The window frame bits stripped when a member is hosted borderless.
@@ -78,6 +81,7 @@ impl Default for HostShared {
 pub struct HostWorker {
     shared: Arc<Mutex<HostShared>>,
     running: Arc<AtomicBool>,
+    started: Arc<AtomicBool>,
     /// Signalled by `update`/`stop` to wake the worker immediately.
     wake: Arc<(Mutex<()>, Condvar)>,
 }
@@ -93,6 +97,7 @@ impl HostWorker {
         Self {
             shared: Arc::new(Mutex::new(HostShared::default())),
             running: Arc::new(AtomicBool::new(true)),
+            started: Arc::new(AtomicBool::new(false)),
             wake: Arc::new((Mutex::new(()), Condvar::new())),
         }
     }
@@ -110,6 +115,10 @@ impl HostWorker {
     }
 
     pub fn start(&self) {
+        // Idempotent: a second `start` must not spawn a duplicate worker loop.
+        if self.started.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let shared = self.shared.clone();
         let running = self.running.clone();
         let wake = self.wake.clone();
@@ -168,16 +177,19 @@ impl HostWorker {
         if host == 0 || TRACKER_ORIG.with(|o| o.get()) != 0 {
             return;
         }
-        let shared = self.shared.clone();
-        TRACKER.with(|t| *t.borrow_mut() = Some(shared));
+        let hwnd = HWND(host as *mut _);
         unsafe {
-            let hwnd = HWND(host as *mut _);
             let orig = GetWindowLongPtrW(hwnd, GWLP_WNDPROC);
             if orig == 0 {
                 return;
             }
+            // Only install the shim once the subclass actually took; otherwise
+            // `host_proc` would chain to a null original proc.
+            if !set_long_ptr(hwnd, GWLP_WNDPROC, host_proc as *const () as isize) {
+                return;
+            }
             TRACKER_ORIG.with(|o| o.set(orig));
-            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, host_proc as *const () as isize);
+            TRACKER.with(|t| *t.borrow_mut() = Some(self.shared.clone()));
         }
     }
 }
@@ -231,8 +243,10 @@ fn retrack(resize: bool) {
     let inset = member_insets(active).unwrap_or(inset);
     // Synchronous (no SWP_ASYNCWINDOWPOS): during a drag the member is idle, so
     // moving it in lockstep is instant; the async post added a frame of lag,
-    // which is what made the member trail the host while dragging.
-    place_member(active, content, inset, resize, false);
+    // which is what made the member trail the host while dragging. A hung member
+    // would block the host thread synchronously, so fall back to an async post.
+    let posted = unsafe { IsHungAppWindow(active).as_bool() };
+    place_member(active, content, inset, resize, posted);
 }
 
 /// Measured frame insets of `mh`: `(offset_x, offset_y, frame_w, frame_h)` where
@@ -424,6 +438,16 @@ fn apply(s: &Snapshot, last: &mut WorkerState) {
     }
 }
 
+/// `SetWindowLongPtrW`, distinguishing the "previous value was 0" success case
+/// from real failure via the last-error code. Returns `false` on failure.
+fn set_long_ptr(hwnd: HWND, index: WINDOW_LONG_PTR_INDEX, value: isize) -> bool {
+    unsafe {
+        SetLastError(WIN32_ERROR(0));
+        let prev = SetWindowLongPtrW(hwnd, index, value);
+        prev != 0 || GetLastError() == WIN32_ERROR(0)
+    }
+}
+
 /// Save styling and set the host as owner (GWL_HWNDPARENT). Ownership only —
 /// never `WS_CHILD`. The native frame is stripped so the content maps 1:1 onto
 /// the host rect (square, edge-to-edge); the original style is always saved for
@@ -438,24 +462,33 @@ pub fn register_member(host: isize, member: isize) -> Option<StylingState> {
             length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
             ..Default::default()
         };
-        let _ = GetWindowPlacement(mh, &mut placement);
+        // Without a valid placement/rect the restore path would put the window
+        // at the origin with zero size, so refuse to host rather than corrupt it.
+        if GetWindowPlacement(mh, &mut placement).is_err() {
+            return None;
+        }
         let mut r = RECT::default();
-        let _ = GetWindowRect(mh, &mut r);
+        if GetWindowRect(mh, &mut r).is_err() {
+            return None;
+        }
         let style = GetWindowLongPtrW(mh, GWL_STYLE);
         let exstyle = GetWindowLongPtrW(mh, GWL_EXSTYLE);
-        // Own the window (ownership only, never WS_CHILD).
-        SetWindowLongPtrW(mh, GWL_HWNDPARENT, host);
+        // Own the window (ownership only, never WS_CHILD). If this fails nothing
+        // has changed yet, so bail before mutating style/exstyle.
+        if !set_long_ptr(mh, GWL_HWNDPARENT, host) {
+            return None;
+        }
         // Drop it from the taskbar and Alt+Tab while hosted: ownership hides an
         // owned window unless it carries WS_EX_APPWINDOW. We only clear
         // WS_EX_APPWINDOW (never add WS_EX_TOOLWINDOW) so the effect is
         // self-healing: if Slate dies, ownership is severed and the window
         // reappears in the taskbar on its own. Restored from `exstyle` on unregister.
         let hosted_ex = exstyle & !(WS_EX_APPWINDOW.0 as isize);
-        SetWindowLongPtrW(mh, GWL_EXSTYLE, hosted_ex);
+        let _ = set_long_ptr(mh, GWL_EXSTYLE, hosted_ex);
         // Borderless layout: strip the frame so the window has no title bar of
         // its own and the content rectangle maps 1:1 onto the host's designated
         // area (square, no frame padding). Restored from `style` on unregister.
-        SetWindowLongPtrW(mh, GWL_STYLE, style & !FRAME);
+        let _ = set_long_ptr(mh, GWL_STYLE, style & !FRAME);
         // Slate chooses this automatically per hosted window; it is reverted on
         // unregister, so it never affects the window once it leaves Slate.
         set_frame_treatment(mh, true);
@@ -531,9 +564,9 @@ pub fn unregister_member(member: isize, st: &StylingState) {
         let _ = ShowWindow(mh, SW_HIDE);
         // Drop any hosting crop so the restored window is not clipped.
         let _ = SetWindowRgn(mh, None, true);
-        SetWindowLongPtrW(mh, GWL_HWNDPARENT, 0);
-        SetWindowLongPtrW(mh, GWL_STYLE, st.style);
-        SetWindowLongPtrW(mh, GWL_EXSTYLE, st.exstyle);
+        let _ = set_long_ptr(mh, GWL_HWNDPARENT, 0);
+        let _ = set_long_ptr(mh, GWL_STYLE, st.style);
+        let _ = set_long_ptr(mh, GWL_EXSTYLE, st.exstyle);
         // Leave the window looking exactly as Slate found it.
         set_frame_treatment(mh, false);
         // Placement restores both the rect and the minimized/maximized state.

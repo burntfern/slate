@@ -18,9 +18,9 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, RegisterClassW, SetWindowPos, ShowWindow, HWND_TOPMOST,
-    SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowPos, ShowWindow,
+    HWND_TOPMOST, SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
 /// Ring thickness in physical pixels.
@@ -28,6 +28,10 @@ const BORDER: i32 = 3;
 /// Ring colour: `#4C8DFF` as a `COLORREF` (`0x00BBGGRR`).
 const ACCENT: COLORREF = COLORREF(0x00FF_8D4C);
 const CLASS: PCWSTR = w!("Slate.PickHighlight");
+
+/// Class background brush, created once and kept for the process lifetime (the
+/// class references it for its whole registered life).
+static CLASS_BRUSH: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -43,15 +47,20 @@ impl Highlight {
     pub fn new() -> Option<Self> {
         unsafe {
             let hinstance = GetModuleHandleW(None).ok()?;
-            let wc = WNDCLASSW {
-                lpfnWndProc: Some(wndproc),
-                hInstance: HINSTANCE(hinstance.0),
-                hbrBackground: CreateSolidBrush(ACCENT),
-                lpszClassName: CLASS,
-                ..Default::default()
-            };
-            // Ignore "class already exists": we only need it registered once.
-            let _ = RegisterClassW(&wc);
+            // Register the class once; the background brush must outlive every
+            // ring window, so it is created only on first registration.
+            if CLASS_BRUSH.get().is_none() {
+                let wc = WNDCLASSW {
+                    lpfnWndProc: Some(wndproc),
+                    hInstance: HINSTANCE(hinstance.0),
+                    hbrBackground: CreateSolidBrush(ACCENT),
+                    lpszClassName: CLASS,
+                    ..Default::default()
+                };
+                // Ignore "class already exists": we only need it registered once.
+                let _ = RegisterClassW(&wc);
+                let _ = CLASS_BRUSH.set(wc.hbrBackground.0 as isize);
+            }
             let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
                 CLASS,
@@ -94,7 +103,10 @@ impl Highlight {
             let inner = CreateRectRgn(BORDER, BORDER, inset_w, inset_h);
             CombineRgn(Some(outer), Some(outer), Some(inner), RGN_DIFF);
             let _ = DeleteObject(HGDIOBJ(inner.0));
-            SetWindowRgn(self.hwnd, Some(outer), true);
+            if SetWindowRgn(self.hwnd, Some(outer), true) == 0 {
+                // On failure the system did not take ownership of `outer`.
+                let _ = DeleteObject(HGDIOBJ(outer.0));
+            }
             let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
         }
     }
@@ -103,6 +115,14 @@ impl Highlight {
     pub fn hide(&self) {
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
+        }
+    }
+}
+
+impl Drop for Highlight {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
         }
     }
 }

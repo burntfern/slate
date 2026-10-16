@@ -827,6 +827,13 @@ impl Controller {
         if self.groups.contains_window(hwnd) {
             return;
         }
+        // Register the window first; only touch the group state once it is
+        // really ours, so a failed registration never leaves an empty active
+        // group that the host would then publish nothing for.
+        let Some(state) = register_member(host, hwnd) else {
+            return;
+        };
+        self.styling.insert(hwnd, state);
         let group = match self.active_group {
             Some(id) => id,
             None => {
@@ -835,11 +842,6 @@ impl Controller {
                 id
             }
         };
-        if let Some(state) = register_member(host, hwnd) {
-            self.styling.insert(hwnd, state);
-        } else {
-            return;
-        }
         if self.settings.tabs.icons {
             self.ensure_icon(hwnd);
         }
@@ -893,7 +895,9 @@ impl Controller {
                 true
             }
             Shortcut::SelectIndex(n) => {
-                let ix = n as usize - 1;
+                let Some(ix) = (n as usize).checked_sub(1) else {
+                    return false;
+                };
                 if ix < len {
                     self.select_tab(group, ids[ix]);
                     true
@@ -913,6 +917,7 @@ impl Controller {
             unregister_member(hwnd, &state);
         }
         self.icons.remove(&hwnd);
+        self.snapshots.remove(&hwnd);
         self.rename_overrides.remove(&hwnd);
         self.tab_colors.remove(&hwnd);
         self.groups.remove_tab(group, tab);
