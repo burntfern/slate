@@ -98,6 +98,13 @@ pub enum Cmd {
     ToggleHoverPreview,
     /// Flip the app's light/dark theme and persist the choice.
     ToggleTheme,
+    /// Set (or clear, with `None`) a tab's accent color by chart-hue index.
+    /// Session-only: colors are forgotten when Slate restarts.
+    SetTabColor {
+        group: GroupId,
+        tab: TabId,
+        color: Option<usize>,
+    },
     /// Hover a tab: after a rest, open the hover preview card under it.
     /// `anchor` is the tab's rectangle in logical client pixels.
     PreviewTab {
@@ -134,6 +141,9 @@ pub struct TabInfo {
     pub exe_path: String,
     /// The window's real icon, ready to render (present only when extracted).
     pub icon: Option<Arc<RenderImage>>,
+    /// The tab's own accent as a chart-hue index (see `HUE_NAMES`), or `None`
+    /// for the plain default look (an untinted ely tab).
+    pub accent: Option<usize>,
 }
 
 /// Best-effort friendly app name from an executable file name: strip the
@@ -241,6 +251,8 @@ pub struct Controller {
     /// Display-title overrides for renamed tabs, keyed by hwnd. Takes precedence
     /// over the live window title and survives retitle events.
     rename_overrides: HashMap<isize, String>,
+    /// Per-tab accent colors (chart-hue index), keyed by hwnd. Session-only.
+    tab_colors: HashMap<isize, usize>,
     /// The hover preview card, while shown. Rendering it hides the member (same
     /// as a menu), so the card is a snapshot captured before the member hid.
     hover_preview: Option<HoverPreview>,
@@ -291,6 +303,7 @@ impl Controller {
             tab_menu: None,
             renaming: None,
             rename_overrides: HashMap::new(),
+            tab_colors: HashMap::new(),
             hover_preview: None,
             hover_tab: None,
             card_hovered: false,
@@ -364,6 +377,7 @@ impl Controller {
                             exe: t.window.exe_name.clone(),
                             exe_path: t.window.exe_path.clone(),
                             icon: self.icons.get(&t.window.hwnd).cloned().flatten(),
+                            accent: self.tab_colors.get(&t.window.hwnd).copied(),
                         })
                         .collect()
                 })
@@ -448,6 +462,7 @@ impl Controller {
             Cmd::ToggleTabBadge => self.toggle_tab_badge(),
             Cmd::ToggleHoverPreview => self.toggle_hover_preview(),
             Cmd::ToggleTheme => self.toggle_theme(cx),
+            Cmd::SetTabColor { group, tab, color } => self.set_tab_color(group, tab, color),
             Cmd::PreviewTab { tab, anchor } => self.preview_hover(tab, anchor, cx),
             Cmd::PreviewHide { tab } => self.preview_unhover(tab, cx),
             Cmd::PreviewCardHover(hovered) => self.preview_card_hover(hovered, cx),
@@ -750,7 +765,23 @@ impl Controller {
         }
         self.icons.remove(&hwnd);
         self.rename_overrides.remove(&hwnd);
+        self.tab_colors.remove(&hwnd);
         self.groups.remove_tab(group, tab);
+    }
+
+    /// Set (or clear) a tab's accent color. Session-only, keyed by hwnd.
+    fn set_tab_color(&mut self, group: GroupId, tab: TabId, color: Option<usize>) {
+        let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
+            return;
+        };
+        match color {
+            Some(index) => {
+                self.tab_colors.insert(hwnd, index);
+            }
+            None => {
+                self.tab_colors.remove(&hwnd);
+            }
+        }
     }
 
     /// Really close a hosted window: post `WM_CLOSE` and let the app quit on
@@ -1050,6 +1081,7 @@ impl Controller {
         self.icons.remove(&hwnd);
         self.snapshots.remove(&hwnd);
         self.rename_overrides.remove(&hwnd);
+        self.tab_colors.remove(&hwnd);
         if let Some(tab) = self.hover_preview.as_ref().map(|p| p.tab) {
             if self.active_group.and_then(|g| self.hwnd_of_tab(g, tab)) == Some(hwnd) {
                 self.hide_hover_preview();

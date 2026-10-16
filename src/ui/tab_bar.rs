@@ -14,10 +14,9 @@ use ely_gpui_component::{
 };
 use gpui::{
     canvas, div, prelude::*, Animation, AnimationExt, App, Bounds, ElementId, EntityId,
-    FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
+    FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
     RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
-
 /// What to draw at the start of a tab.
 #[derive(Clone)]
 pub enum TabIcon {
@@ -33,6 +32,8 @@ pub struct SlateTab {
     id: SharedString,
     title: SharedString,
     icon: TabIcon,
+    /// Accent color drawn as a bar along the tab's top edge. `None` draws none.
+    accent: Option<Hsla>,
 }
 
 impl SlateTab {
@@ -41,7 +42,14 @@ impl SlateTab {
             id: id.into(),
             title: title.into(),
             icon,
+            accent: None,
         }
+    }
+
+    /// The colored top edge for this tab.
+    pub fn accent(mut self, color: Option<Hsla>) -> Self {
+        self.accent = color;
+        self
     }
 }
 
@@ -162,6 +170,10 @@ impl RenderOnce for SlateTabBar {
             let theme = cx.theme();
             let colors = &theme.colors;
             let selected = self.selected.as_ref() == Some(&tab.id);
+            let accent = tab.accent;
+            // An accented tab is washed with a light tint of its hue, not just
+            // edged — the active tab reads a touch stronger than the rest.
+            let tint = accent.map(|color| color.opacity(if selected { 0.24 } else { 0.15 }));
             let group = SharedString::from(format!("window-tab-{}", tab.id));
             let (select, close, reorder, context) = (
                 self.on_select.clone(),
@@ -200,14 +212,17 @@ impl RenderOnce for SlateTabBar {
                 .text_size(theme.text_size(TextSize::Sm))
                 .map(|el| {
                     if selected {
-                        el.bg(colors.surface)
+                        el.bg(tint.unwrap_or(colors.surface))
                             .border_color(colors.border)
                             .text_color(colors.fg)
                             .font_weight(FontWeight::MEDIUM)
                     } else {
-                        el.border_color(gpui::transparent_black())
+                        el.bg(tint.unwrap_or(gpui::transparent_black()))
+                            .border_color(gpui::transparent_black())
                             .text_color(colors.fg_muted)
-                            .hover(|style| style.bg(lit))
+                            .hover(move |style| {
+                                style.bg(tint.map(|c| c.opacity(0.28)).unwrap_or(lit))
+                            })
                     }
                 })
                 .cursor_pointer()

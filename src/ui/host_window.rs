@@ -14,7 +14,7 @@ use ely_gpui_component::{
     overlays::PromptDialog,
     primitives::{Icon, IconName, Image},
     shell::{drag_region, WindowControls},
-    theme::{ActiveTheme, ControlSize, Elevation, IconSize, Mode, Radius, TextSize},
+    theme::{ActiveTheme, ControlSize, Elevation, IconSize, Mode, Radius, TextSize, HUE_NAMES},
     typography::{Caption, Ellipsis},
 };
 use gpui::{
@@ -254,7 +254,10 @@ impl Render for HostWindow {
             if let Some(hwnd) = hwnd_of(window) {
                 let titlebar_h = {
                     let theme = cx.theme();
-                    theme.titlebar_height().to_pixels(theme.base_rem()).as_f32()
+                    theme
+                        .titlebar_height()
+                        .to_pixels(window.rem_size())
+                        .as_f32()
                 };
                 controller.update(cx, |c, cx| {
                     c.dispatch(
@@ -289,12 +292,16 @@ impl Render for HostWindow {
         let group = info.group;
 
         let mut tab_bar = SlateTabBar::new("host-tabs");
-        for TabInfo { id, title, icon, .. } in &info.tabs {
+        let palette = cx.theme().palette();
+        for TabInfo { id, title, icon, accent, .. } in &info.tabs {
             let icon = match (info.icons_in_tabs, icon) {
                 (true, Some(image)) => TabIcon::Real(image.clone()),
                 _ => TabIcon::Glyph(IconName::AppWindow),
             };
-            tab_bar = tab_bar.tab(SlateTab::new(id.0.to_string(), title.clone(), icon));
+            let color = accent.map(|index| palette.hue(index, "tab accent"));
+            tab_bar = tab_bar.tab(
+                SlateTab::new(id.0.to_string(), title.clone(), icon).accent(color),
+            );
         }
         if let Some(active) = &info.active {
             tab_bar = tab_bar.selected(SharedString::from(active.0.to_string()));
@@ -1028,7 +1035,65 @@ impl Render for HostWindow {
             let divider = |id: &'static str| {
                 div().id(id).my_1().h(px(1.0)).w_full().bg(colors.border)
             };
+
+            // Color: a thin strip laid out like the tab's top edge. The first
+            // segment is "no color" — the plain default tab. Picking a hue sets
+            // a per-tab accent. Session-only.
+            let accent_now = ix.and_then(|i| info.tabs.get(i)).and_then(|t| t.accent);
+            let palette = theme.palette();
+            let set_color = |color: Option<usize>| {
+                let ctrl = controller.clone();
+                move |_: &gpui::ClickEvent, _w: &mut Window, cx: &mut App| {
+                    ctrl.update(cx, |c, cx| {
+                        c.dispatch(Cmd::SetTabColor { group, tab, color }, cx);
+                        c.dispatch(Cmd::CloseTabMenu, cx);
+                    });
+                }
+            };
+            let none_seg = {
+                let selected = accent_now.is_none();
+                let click = set_color(None);
+                div()
+                    .id("ctx-swatch-none")
+                    .flex_1()
+                    .h(px(4.0))
+                    .rounded_full()
+                    .border_1()
+                    .border_color(colors.border_strong)
+                    .cursor_pointer()
+                    .when(selected, |el| el.h(px(7.0)).bg(colors.hover))
+                    .hover(|style| style.opacity(0.8))
+                    .on_click(click)
+            };
+            let swatches = HUE_NAMES.iter().enumerate().map(|(index, name)| {
+                let selected = accent_now == Some(index);
+                let color = palette.hue(index, name);
+                let click = set_color(Some(index));
+                div()
+                    .id(("ctx-swatch", index))
+                    .flex_1()
+                    .h(px(4.0))
+                    .rounded_full()
+                    .bg(color)
+                    .cursor_pointer()
+                    .when(selected, |el| el.h(px(7.0)))
+                    .hover(|style| style.opacity(0.8))
+                    .on_click(click)
+            });
+            let color_row = div()
+                .id("ctx-color")
+                .flex()
+                .items_center()
+                .gap_1()
+                .w_full()
+                .px_1()
+                .py_2()
+                .child(none_seg)
+                .children(swatches);
+
             let rows = vec![
+                color_row,
+                divider("ctx-divider-color"),
                 item(
                     "ctx-rename",
                     "Rename\u{2026}",
@@ -1202,8 +1267,18 @@ impl Render for HostWindow {
             .pl(px(leading_inset))
             .child(menu_wrap)
             // `flex_1` + `min_w_0` gives the tab bar a definite width to divide
-            // among its tabs, so they shrink together as more open.
-            .child(div().flex_1().min_w_0().child(tab_bar))
+            // among its tabs, so they shrink together as more open. `h_full` +
+            // `items_center` centers the strip in the bar so the gap above and
+            // below a tab is even.
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .items_center()
+                    .child(tab_bar),
+            )
             .child(pick_slot)
             .child(tab_overflow)
             .child(make_theme())
