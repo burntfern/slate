@@ -1,117 +1,8 @@
-//! Persisted settings.
-//!
-//! Everything lives under `%USERPROFILE%\.burntfern\`:
-//!
-//! ```text
-//! .burntfern\
-//!   config.json          # shared across every burntfern app
-//!   slate\
-//!     settings.json      # Slate-specific
-//!     sets.json          # saved tab sets
-//!     logs\  backups\
-//! ```
-//!
-//! Values cascade **baked defaults <- shared `config.json` <- `slate\settings.json`**.
-//! Writes are atomic (temp + rename); a corrupt file is moved to `backups\` and
-//! the app falls back to defaults instead of crashing.
-
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-/// On-disk settings version. Bump when the shape changes and add a migration.
-pub const SCHEMA_VERSION: u32 = 1;
-
-/// Resolved settings handed to the app.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // accent/schema_version land in later phases
-pub struct Settings {
-    #[serde(default = "schema_version")]
-    pub schema_version: u32,
-    #[serde(default = "theme_default")]
-    pub theme: String,
-    #[serde(default = "accent_default")]
-    pub accent: String,
-    #[serde(default)]
-    pub tabs: Tabs,
-}
-
-/// Tab-strip preferences.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tabs {
-    #[serde(default = "yes")]
-    pub icons: bool,
-    #[serde(default = "yes")]
-    pub count_badge: bool,
-    #[serde(default = "yes")]
-    pub hover_preview: bool,
-    /// When false the tab strip is hidden (the +/chevron/controls remain).
-    #[serde(default = "yes")]
-    pub show_bar: bool,
-}
-
-impl Default for Tabs {
-    fn default() -> Self {
-        Self {
-            icons: true,
-            count_badge: true,
-            hover_preview: true,
-            show_bar: true,
-        }
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            theme: theme_default(),
-            accent: accent_default(),
-            tabs: Tabs::default(),
-        }
-    }
-}
-
-/// A named snapshot of the tabs that were open in the host. Windows are stored
-/// by executable path plus a title hint, never by HWND (an HWND is meaningless
-/// across runs).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SavedSet {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub tabs: Vec<SavedTab>,
-}
-
-/// One tab inside a [`SavedSet`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SavedTab {
-    #[serde(default)]
-    pub exe_path: String,
-    #[serde(default)]
-    pub exe_name: String,
-    #[serde(default)]
-    pub title_hint: String,
-}
-
-/// The persisted collection of saved tab sets (`slate\sets.json`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SavedSets {
-    #[serde(default = "schema_version")]
-    pub schema_version: u32,
-    #[serde(default)]
-    pub sets: Vec<SavedSet>,
-}
-
-impl Default for SavedSets {
-    fn default() -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            sets: Vec::new(),
-        }
-    }
-}
+use super::schema::{SavedSet, SavedSets, Settings, SCHEMA_VERSION};
 
 /// A file whose keys are all optional, so a partial file only overrides what it
 /// actually sets. Used for both the shared and the app file.
@@ -128,19 +19,6 @@ struct PartialTabs {
     count_badge: Option<bool>,
     hover_preview: Option<bool>,
     show_bar: Option<bool>,
-}
-
-fn schema_version() -> u32 {
-    SCHEMA_VERSION
-}
-fn theme_default() -> String {
-    "system".to_string()
-}
-fn accent_default() -> String {
-    "blue".to_string()
-}
-fn yes() -> bool {
-    true
 }
 
 // --- paths -------------------------------------------------------------------
@@ -268,16 +146,6 @@ pub fn load() -> Settings {
     merged
 }
 
-/// Persist settings atomically, creating the directory if needed.
-pub fn save(settings: &Settings) {
-    let _ = std::fs::create_dir_all(app_dir());
-    let Ok(mut json) = serde_json::to_string_pretty(settings) else {
-        return;
-    };
-    json.push('\n');
-    atomic_write(&settings_path(), json.as_bytes());
-}
-
 /// Load the saved tab sets. A missing file yields an empty set; a corrupt one is
 /// backed up and treated as empty rather than crashing.
 pub fn load_sets() -> SavedSets {
@@ -309,16 +177,6 @@ fn parse_sets(value: serde_json::Value) -> SavedSets {
             .collect();
     }
     out
-}
-
-/// Persist the saved tab sets atomically, creating the directory if needed.
-pub fn save_sets(sets: &SavedSets) {
-    let _ = std::fs::create_dir_all(app_dir());
-    let Ok(mut json) = serde_json::to_string_pretty(sets) else {
-        return;
-    };
-    json.push('\n');
-    atomic_write(&sets_path(), json.as_bytes());
 }
 
 /// Read one file into its partial form; a corrupt file is backed up and ignored.
@@ -365,7 +223,7 @@ fn apply(settings: &mut Settings, partial: PartialSettings) {
 }
 
 /// Bring an older on-disk shape forward. Pure: no IO, unit-tested.
-pub fn migrate(mut value: serde_json::Value) -> serde_json::Value {
+fn migrate(mut value: serde_json::Value) -> serde_json::Value {
     // Valid JSON that is not an object (a bare number/string/array/null) has no
     // keys to migrate; the caller's deserialize step rejects it and falls back.
     if !value.is_object() {
@@ -380,38 +238,6 @@ pub fn migrate(mut value: serde_json::Value) -> serde_json::Value {
     }
     // Future: `if version < 2 { ... }`.
     value
-}
-
-/// A unique sibling temp path, so concurrent saves never clobber a shared `.tmp`.
-fn temp_path_for(path: &Path) -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()))
-}
-
-/// Write `bytes` to `path` via a flushed temp file + rename so a crash never
-/// leaves a truncated file in place of the last good one.
-fn atomic_write(path: &Path, bytes: &[u8]) -> bool {
-    let tmp = temp_path_for(path);
-    let flushed = (|| -> std::io::Result<()> {
-        use std::io::Write;
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()
-    })();
-    if flushed.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return false;
-    }
-    if std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return false;
-    }
-    true
 }
 
 /// Move a corrupt file into `backups\` with a timestamp, so it is preserved but
@@ -432,13 +258,6 @@ fn backup(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults_are_all_on() {
-        let s = Settings::default();
-        assert_eq!(s.schema_version, SCHEMA_VERSION);
-        assert!(s.tabs.icons && s.tabs.count_badge && s.tabs.hover_preview);
-    }
 
     #[test]
     fn partial_overrides_only_what_it_sets() {
@@ -509,34 +328,5 @@ mod tests {
         let sets = parse_sets(value);
         let names: Vec<_> = sets.sets.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Good", "AlsoGood"]);
-    }
-
-    #[test]
-    fn settings_round_trip() {
-        let s = Settings::default();
-        let json = serde_json::to_string(&s).unwrap();
-        let back: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.theme, s.theme);
-        assert_eq!(back.tabs.icons, s.tabs.icons);
-    }
-
-    #[test]
-    fn saved_sets_round_trip() {
-        let sets = SavedSets {
-            schema_version: SCHEMA_VERSION,
-            sets: vec![SavedSet {
-                name: "Work".into(),
-                tabs: vec![SavedTab {
-                    exe_path: "C:\\x\\chrome.exe".into(),
-                    exe_name: "chrome.exe".into(),
-                    title_hint: "Tab".into(),
-                }],
-            }],
-        };
-        let json = serde_json::to_string(&sets).unwrap();
-        let back: SavedSets = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.sets.len(), 1);
-        assert_eq!(back.sets[0].name, "Work");
-        assert_eq!(back.sets[0].tabs[0].exe_name, "chrome.exe");
     }
 }

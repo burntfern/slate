@@ -837,7 +837,7 @@ impl Controller {
         let group = match self.active_group {
             Some(id) => id,
             None => {
-                let id = self.groups.create_group("Slate", Vec::new());
+                let id = self.groups.create_group(Vec::new());
                 self.active_group = Some(id);
                 id
             }
