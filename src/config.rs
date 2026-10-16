@@ -413,6 +413,7 @@ mod tests {
                     icons: Some(false),
                     count_badge: None,
                     hover_preview: None,
+                    show_bar: None,
                 }),
             },
         );

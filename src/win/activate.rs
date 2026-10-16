@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow,
-    ShowWindow, SW_RESTORE, WM_CLOSE,
+    SetWindowPos, ShowWindow, SWP_ASYNCWINDOWPOS, SWP_NOZORDER, SW_RESTORE, WM_CLOSE,
 };
 
 /// Bring the given window to the foreground. Returns true on best-effort
@@ -44,6 +44,29 @@ pub fn activate_window(hwnd: isize) -> bool {
 pub fn close_window(hwnd: isize) -> bool {
     let h = HWND(hwnd as *mut _);
     unsafe { PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok() }
+}
+
+/// Move/resize a window to `(x, y, width, height)` in physical pixels. Used when
+/// a tab is dragged out of the host: the window is restored, then dropped at the
+/// cursor so it lands where the user released it (possibly on another monitor).
+/// Best-effort; never panics, never changes z-order on its own.
+pub fn move_window(hwnd: isize, x: i32, y: i32, w: i32, h: i32) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    let win = HWND(hwnd as *mut _);
+    unsafe {
+        SetWindowPos(
+            win,
+            None,
+            x,
+            y,
+            w.max(1),
+            h.max(1),
+            SWP_NOZORDER | SWP_ASYNCWINDOWPOS,
+        )
+        .is_ok()
+    }
 }
 
 /// A window's on-screen rectangle as `(x, y, width, height)` in physical

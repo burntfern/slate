@@ -21,10 +21,10 @@ use crate::config;
 use crate::core::{Effect, GroupId, GroupSet, TabId, WindowIdentity};
 use crate::win::{
     activate_window, capture_window, close_window, content_rect_screen, ctrl_held,
-    enumerate_windows, install_window_icon, is_blacklisted, register_member, set_owned,
-    unregister_member, window_icon, window_rect, window_title, window_under_cursor, Highlight,
-    HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey, Shortcut, ShortcutCapture,
-    StylingState, WinEvent, WinEventPump, WindowSnapshot,
+    enumerate_windows, install_window_icon, is_blacklisted, move_window, register_member,
+    set_owned, unregister_member, window_icon, window_rect, window_title, window_under_cursor,
+    Highlight, HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey, Shortcut,
+    ShortcutCapture, StylingState, WinEvent, WinEventPump, WindowSnapshot,
 };
 
 /// UI → controller intent. The UI never calls Win32 directly.
@@ -48,6 +48,14 @@ pub enum Cmd {
     CloseTab {
         group: GroupId,
         tab: TabId,
+    },
+    /// Drag a tab out of the strip and drop it over the content area: ungroup it
+    /// and move the restored window to the drop's screen position, so it lands
+    /// where the user released it (e.g. another monitor).
+    DetachTabOut {
+        from: usize,
+        screen_x: f32,
+        screen_y: f32,
     },
     ReorderTab {
         group: GroupId,
@@ -527,6 +535,11 @@ impl Controller {
             Cmd::SelectTab { group, tab } => self.select_tab(group, tab),
             Cmd::Ungroup { group, tab } => self.ungroup(group, tab),
             Cmd::CloseTab { group, tab } => self.close_tab(group, tab),
+            Cmd::DetachTabOut {
+                from,
+                screen_x,
+                screen_y,
+            } => self.detach_tab_out(from, screen_x, screen_y),
             Cmd::ReorderTab { group, from, to } => self.reorder(group, from, to),
             Cmd::BeginPick => self.begin_pick(cx),
             Cmd::ToggleIconsInTabs => self.toggle_icons_in_tabs(),
@@ -905,6 +918,43 @@ impl Controller {
         self.groups.remove_tab(group, tab);
     }
 
+    /// Detach the tab at `from` in the active group and drop its window at the
+    /// given screen position (the drag-out gesture).
+    fn detach_tab_out(&mut self, from: usize, screen_x: f32, screen_y: f32) {
+        let Some(group) = self.active_group else {
+            return;
+        };
+        let Some(tab) = self
+            .groups
+            .group(group)
+            .and_then(|g| g.tabs.get(from))
+            .map(|t| t.id)
+        else {
+            return;
+        };
+        self.detach_tab_at(group, tab, screen_x, screen_y);
+    }
+
+    /// Ungroup `tab` and move its restored window so the cursor lands near its
+    /// top edge. The window keeps the size it had before it was hosted (or a
+    /// sensible default for a window with no saved rect).
+    fn detach_tab_at(&mut self, group: GroupId, tab: TabId, screen_x: f32, screen_y: f32) {
+        let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
+            return;
+        };
+        let size = self
+            .styling
+            .get(&hwnd)
+            .map(|s| (s.rect.2 - s.rect.0, s.rect.3 - s.rect.1))
+            .filter(|(w, h)| *w > 0 && *h > 0);
+        self.ungroup(group, tab);
+        let (w, h) = size.unwrap_or((900, 640));
+        let x = screen_x as i32 - w / 2;
+        let y = (screen_y as i32 - 24).max(0);
+        move_window(hwnd, x, y, w, h);
+        activate_window(hwnd);
+    }
+
     /// Set (or clear) a tab's accent color. Session-only, keyed by hwnd.
     fn set_tab_color(&mut self, group: GroupId, tab: TabId, color: Option<usize>) {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
@@ -1154,9 +1204,7 @@ impl Controller {
         let eligible: Vec<isize> = self
             .windows
             .iter()
-            .filter(|w| {
-                !is_blacklisted(&w.class) && !w.elevated && !hosted.contains(&w.hwnd)
-            })
+            .filter(|w| !is_blacklisted(&w.class) && !w.elevated && !hosted.contains(&w.hwnd))
             .map(|w| w.hwnd)
             .collect();
         for hwnd in eligible {

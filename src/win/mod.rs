@@ -13,7 +13,7 @@ pub mod shortcut;
 pub mod stack;
 pub mod tray;
 
-pub use activate::{activate_window, close_window, window_rect};
+pub use activate::{activate_window, close_window, move_window, window_rect};
 pub use capture::{capture_window, WindowSnapshot};
 pub use compat::is_blacklisted;
 pub use enumerate::{enumerate_windows, window_title};

@@ -13,9 +13,9 @@ use ely_gpui_component::{
     typography::Ellipsis,
 };
 use gpui::{
-    canvas, div, prelude::*, Animation, AnimationExt, App, Bounds, ElementId, EntityId, FontWeight,
-    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderImage,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
+    canvas, div, prelude::*, px, Animation, AnimationExt, App, Bounds, ElementId, EntityId,
+    FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
+    RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 /// What to draw at the start of a tab.
 #[derive(Clone)]
@@ -53,9 +53,12 @@ impl SlateTab {
     }
 }
 
-struct TabDrag {
-    owner: EntityId,
-    from: usize,
+/// A tab being dragged. Public so a drop target outside the strip (e.g. the host
+/// content area) can accept a drag-out and detach the tab's window.
+#[derive(Clone)]
+pub struct TabDrag {
+    pub owner: EntityId,
+    pub from: usize,
 }
 
 type OnTab = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
@@ -155,8 +158,13 @@ impl RenderOnce for SlateTabBar {
         let theme = cx.theme();
         // Tabs share the bar's width: they grow to `wide` when there is room and
         // shrink together down to `narrow` as more open, exactly like ely's
-        // default `TabBar`. No fixed width, so the strip never overflows.
+        // default `TabBar`. The bar itself is laid out at its natural content
+        // width (`n * wide` plus the gaps) so the host's `ScrollArea` can clip
+        // and scroll it once the tabs no longer fit the title bar.
         let (narrow, wide) = theme.tab_width();
+        let (rem, gap) = (window.rem_size(), px(4.0));
+        let n = self.tabs.len();
+        let content_w = wide.to_pixels(rem) * (n as f32) + gap * (n.saturating_sub(1) as f32);
         let icon_px = theme.icon_size(IconSize::Sm).to_pixels(theme.base_rem());
         let enter = motion::duration(motion::BASE, cx);
         let nudge = motion::NUDGE;
@@ -335,18 +343,17 @@ impl RenderOnce for SlateTabBar {
                     move |el, t| el.opacity(t).mt(nudge * (1.0 - t)),
                 )
         });
-        // Tabs are direct children of the bar (as in ely's `TabBar`), so their
-        // `flex_1` shares the bar's width. With few tabs they sit at their
-        // capped `max_w` and `+` drifts right after the last one; as more open
-        // they shrink to `narrow`. `w_full` makes the bar fill the title bar's
-        // `flex_1` slot so the tabs have a definite width to divide.
+        // Tabs are direct children of the bar (as in ely's `TabBar`); the bar is
+        // sized to its content (`content_w`) so it overflows the host's clipped
+        // `ScrollArea` instead of squeezing every tab down to `narrow`.
         div()
             .id(self.id)
             .flex()
+            .flex_none()
             .items_center()
-            .gap_1()
-            .w_full()
-            .min_w_0()
+            .gap(gap)
+            .w(content_w)
+            .h_full()
             .children(tabs)
     }
 }

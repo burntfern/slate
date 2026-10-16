@@ -18,14 +18,15 @@ use ely_gpui_component::{
     typography::{Caption, Ellipsis},
 };
 use gpui::{
-    canvas, div, point, prelude::*, px, Animation, AnimationExt, App, AppContext, Bounds,
-    ClipboardItem, Context, Div, Entity, FontWeight, IntoElement, MouseButton, ParentElement,
-    Pixels, Point, Render, RenderImage, SharedString, Size, Styled, Subscription, Window,
+    canvas, div, linear_color_stop, linear_gradient, point, prelude::*, px, Animation,
+    AnimationExt, App, AppContext, Bounds, ClipboardItem, Context, Div, Entity, FontWeight,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, Render, RenderImage, ScrollHandle,
+    ScrollWheelEvent, SharedString, Size, Styled, Subscription, Window,
 };
 
 use crate::controller::{Cmd, Controller, HoverPreview, SavedPrompt, TabInfo};
 use crate::core::TabId;
-use crate::ui::tab_bar::{SlateTab, SlateTabBar, TabIcon};
+use crate::ui::tab_bar::{SlateTab, SlateTabBar, TabDrag, TabIcon};
 
 fn hwnd_of(window: &Window) -> Option<isize> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -95,6 +96,9 @@ pub struct HostWindow {
     /// The prompt (save vs rename) whose text is currently loaded into
     /// `saved_field`, so we only reset the text when the prompt changes target.
     saved_primed: Option<SavedPrompt>,
+    /// Scroll state for the tab strip, so the host's `ScrollArea` can clip and
+    /// scroll it horizontally once the tabs no longer fit.
+    tab_scroll: ScrollHandle,
     _observe: Subscription,
     /// Re-render whenever the controller mutates (tab add/remove/retitle, live
     /// events). Without this the strip only refreshes on direct interaction.
@@ -117,6 +121,7 @@ impl HostWindow {
             rename_primed: None,
             saved_field: None,
             saved_primed: None,
+            tab_scroll: ScrollHandle::new(),
             _observe,
             _observe_controller,
         }
@@ -1183,7 +1188,6 @@ impl Render for HostWindow {
             ));
         }
 
-
         // The tab right-click menu. Hand-rolled for the same occlusion reason:
         // ely's `ContextMenu` panel would sit under a hosted member.
         let tab_menu_panel = info.tab_menu.as_ref().and_then(|menu| {
@@ -1555,34 +1559,119 @@ impl Render for HostWindow {
         } else {
             picker_wrap.into_any_element()
         };
-        let title_bar = drag_region("host-titlebar", window, cx)
-            .flex()
-            .items_center()
-            .gap_1()
-            .flex_none()
-            .h(titlebar_h)
-            .bg(bg)
-            .pl(px(leading_inset))
-            .child(menu_wrap)
-            // `flex_1` + `min_w_0` gives the tab bar a definite width to divide
-            // among its tabs, so they shrink together as more open. `h_full` +
-            // `items_center` centers the strip in the bar so the gap above and
-            // below a tab is even.
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .items_center()
-                    .when(info.show_tab_bar, |el| el.child(tab_bar)),
-            )
-            .child(pick_slot)
-            .child(tab_overflow)
-            .child(saved_wrap)
-            .child(make_theme())
-            .child(div().flex_none().w(px(64.0)))
-            .child(div().flex_none().occlude().child(controls));
+        let title_bar =
+            drag_region("host-titlebar", window, cx)
+                .flex()
+                .items_center()
+                .gap_1()
+                .flex_none()
+                .h(titlebar_h)
+                .bg(bg)
+                .pl(px(leading_inset))
+                .child(menu_wrap)
+                // The strip is clipped and scrollable: the bar is laid out at its
+                // content width, so once the tabs no longer fit they scroll under a
+                // soft fade at each edge (no scrollbar) instead of squeezing to fit.
+                // Tabs (and everything they cover) use `occlude`, which also blocks
+                // scroll hit-testing behind them, so the wheel is handled by a raw
+                // paint-phase listener that hit-tests the strip by bounds instead of
+                // by hitbox: that way a plain (vertical) wheel scrolls the strip even
+                // with the cursor over a tab. Horizontal wheel / trackpad scrolls
+                // natively (`delta.x` is nonzero, so the mapping stands aside).
+                .child({
+                    let handle = self.tab_scroll.clone();
+                    let (offset, max) = (handle.offset().x, handle.max_offset().x);
+                    let overflowing = max > Pixels::ZERO;
+                    let clear = bg.opacity(0.0);
+                    let left_fade = div().absolute().top_0().bottom_0().left_0().w(px(18.0)).bg(
+                        linear_gradient(
+                            90.0,
+                            linear_color_stop(bg, 0.0),
+                            linear_color_stop(clear, 1.0),
+                        ),
+                    );
+                    let right_fade = div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(px(18.0))
+                        .bg(linear_gradient(
+                            90.0,
+                            linear_color_stop(clear, 0.0),
+                            linear_color_stop(bg, 1.0),
+                        ));
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .when(info.show_tab_bar, |wrap| {
+                            wrap.child(
+                                div()
+                                    .id("host-tabs-scroll")
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .overflow_x_scroll()
+                                    .restrict_scroll_to_axis()
+                                    .track_scroll(&handle)
+                                    .child(tab_bar),
+                            )
+                            // A hitbox-free layer over the strip that registers a
+                            // window wheel listener each frame; it scrolls by bounds
+                            // (so `occlude` on the tabs can't block it).
+                            .child({
+                                let wheel = handle.clone();
+                                canvas(
+                                    |_, _, _| {},
+                                    move |bounds, _, window, _cx| {
+                                        let view = window.current_view();
+                                        let wheel = wheel.clone();
+                                        window.on_mouse_event(
+                                            move |event: &ScrollWheelEvent, _phase, window, cx| {
+                                                if !bounds.contains(&event.position) {
+                                                    return;
+                                                }
+                                                let delta =
+                                                    event.delta.pixel_delta(window.line_height());
+                                                // Horizontal wheel: gpui scrolls `x`.
+                                                if delta.x != Pixels::ZERO {
+                                                    return;
+                                                }
+                                                let max = wheel.max_offset().x;
+                                                if delta.y == Pixels::ZERO || max <= Pixels::ZERO {
+                                                    return;
+                                                }
+                                                let mut offset = wheel.offset();
+                                                let next =
+                                                    (offset.x + delta.y).clamp(-max, Pixels::ZERO);
+                                                if next != offset.x {
+                                                    offset.x = next;
+                                                    wheel.set_offset(offset);
+                                                    cx.notify(view);
+                                                }
+                                            },
+                                        );
+                                    },
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                            })
+                            .when(overflowing && offset < Pixels::ZERO, |wrap| {
+                                wrap.child(left_fade)
+                            })
+                            .when(overflowing && offset > -max, |wrap| wrap.child(right_fade))
+                        })
+                })
+                .child(pick_slot)
+                .child(tab_overflow)
+                .child(saved_wrap)
+                .child(make_theme())
+                .child(div().flex_none().w(px(64.0)))
+                .child(div().flex_none().occlude().child(controls));
 
         // Any press that reaches the root (i.e. not swallowed by a dropdown
         // panel or one of the triggers, which stop propagation) means the open
@@ -1637,6 +1726,29 @@ impl Render for HostWindow {
             }
         };
 
+        // Drag-out detach: releasing a dragged tab anywhere outside the strip
+        // (i.e. over the content root) returns that window to the desktop at the
+        // cursor, so it can be dropped on another monitor.
+        let detach_out = {
+            let ctrl = controller.clone();
+            move |drag: &TabDrag, window: &mut Window, cx: &mut App| {
+                let origin = window.bounds().origin;
+                let mouse = window.mouse_position();
+                let screen_x = origin.x.as_f32() + mouse.x.as_f32();
+                let screen_y = origin.y.as_f32() + mouse.y.as_f32();
+                ctrl.update(cx, |c, cx| {
+                    c.dispatch(
+                        Cmd::DetachTabOut {
+                            from: drag.from,
+                            screen_x,
+                            screen_y,
+                        },
+                        cx,
+                    );
+                });
+            }
+        };
+
         let content = div()
             .id("host-content")
             .size_full()
@@ -1645,6 +1757,7 @@ impl Render for HostWindow {
             .bg(bg)
             .on_mouse_down(MouseButton::Left, dismiss)
             .on_key_down(escape)
+            .on_drop::<TabDrag>(detach_out)
             .child(title_bar);
 
         // Every state that hides the hosted member: the empty-state art stands
