@@ -13,9 +13,9 @@ use ely_gpui_component::{
     typography::Ellipsis,
 };
 use gpui::{
-    canvas, div, prelude::*, Animation, AnimationExt, App, Bounds, ElementId, EntityId,
-    FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
-    RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
+    canvas, div, prelude::*, Animation, AnimationExt, App, Bounds, ElementId, EntityId, FontWeight,
+    Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderImage,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 /// What to draw at the start of a tab.
 #[derive(Clone)]
@@ -321,14 +321,12 @@ impl RenderOnce for SlateTabBar {
                             .when(!selected, |slot| {
                                 slot.invisible().group_hover(group, |style| style.visible())
                             })
-                            .child(
-                                close_button(("close", ix))
-                                    .size(ControlSize::Sm)
-                                    .on_click(move |_, window, cx| {
-                                        cx.stop_propagation();
-                                        close(&close_id, window, cx);
-                                    }),
-                            ),
+                            .child(close_button(("close", ix)).size(ControlSize::Sm).on_click(
+                                move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    close(&close_id, window, cx);
+                                },
+                            )),
                     )
                 })
                 .with_animation(

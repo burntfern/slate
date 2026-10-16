@@ -1,6 +1,6 @@
-mod core;
 #[cfg(windows)]
 mod config;
+mod core;
 #[cfg(windows)]
 mod win;
 

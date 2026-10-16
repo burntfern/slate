@@ -54,7 +54,7 @@ struct Bitmap(HBITMAP);
 impl Drop for Bitmap {
     fn drop(&mut self) {
         if !self.0.is_invalid() {
-            let _ = unsafe { DeleteObject(HGDIOBJ(self.0.0)) };
+            let _ = unsafe { DeleteObject(HGDIOBJ(self.0 .0)) };
         }
     }
 }
@@ -84,7 +84,7 @@ unsafe fn grab(hwnd: isize) -> Option<WindowSnapshot> {
         return None;
     }
 
-    let old = SelectObject(mem.0, HGDIOBJ(bmp.0.0));
+    let old = SelectObject(mem.0, HGDIOBJ(bmp.0 .0));
     SetStretchBltMode(mem.0, HALFTONE);
     let drawn = StretchBlt(
         mem.0,

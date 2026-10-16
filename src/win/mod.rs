@@ -11,6 +11,7 @@ pub mod janitor;
 pub mod pick;
 pub mod shortcut;
 pub mod stack;
+pub mod tray;
 
 pub use activate::{activate_window, close_window, window_rect};
 pub use capture::{capture_window, WindowSnapshot};
@@ -18,10 +19,9 @@ pub use compat::is_blacklisted;
 pub use enumerate::{enumerate_windows, window_title};
 pub use events::{WinEvent, WinEventPump};
 pub use highlight::Highlight;
-pub use host::{
-    content_rect_screen, register_member, unregister_member, HostWorker, StylingState,
-};
+pub use host::{content_rect_screen, register_member, unregister_member, HostWorker, StylingState};
 pub use icon::{install_window_icon, window_icon, IconPixels};
 pub use janitor::Janitor;
 pub use pick::{window_under_cursor, KeyboardCapture, PickKey};
 pub use shortcut::{ctrl_held, set_owned, Shortcut, ShortcutCapture};
+pub use tray::TrayIcon;

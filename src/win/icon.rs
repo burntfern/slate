@@ -56,6 +56,15 @@ pub fn install_window_icon(hwnd: isize) {
     }
 }
 
+/// Build an alpha-preserving `HICON` of `size`x`size` from the selected logo
+/// (`SLATE_LOGO`). Used by the tray icon. Never panics.
+pub fn app_hicon(size: u32) -> Option<isize> {
+    const PNG: &[u8] = include_bytes!(env!("SLATE_LOGO"));
+    let image = image::load_from_memory(PNG).ok()?.to_rgba8();
+    // Safety: builds a fresh HICON from a decoded RGBA buffer.
+    unsafe { hicon_from_rgba(&image, size) }
+}
+
 /// Build an alpha-preserving HICON of `size`x`size` from an RGBA image.
 unsafe fn hicon_from_rgba(image: &image::RgbaImage, size: u32) -> Option<isize> {
     let resized = image::imageops::resize(image, size, size, image::imageops::FilterType::Lanczos3);

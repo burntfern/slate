@@ -7,7 +7,7 @@
 //!   config.json          # shared across every burntfern app
 //!   slate\
 //!     settings.json      # Slate-specific
-//!     groups.json        # saved groups (later)
+//!     sets.json          # saved tab sets
 //!     logs\  backups\
 //! ```
 //!
@@ -45,6 +45,9 @@ pub struct Tabs {
     pub count_badge: bool,
     #[serde(default = "yes")]
     pub hover_preview: bool,
+    /// When false the tab strip is hidden (the +/chevron/controls remain).
+    #[serde(default = "yes")]
+    pub show_bar: bool,
 }
 
 impl Default for Tabs {
@@ -53,6 +56,7 @@ impl Default for Tabs {
             icons: true,
             count_badge: true,
             hover_preview: true,
+            show_bar: true,
         }
     }
 }
@@ -64,6 +68,45 @@ impl Default for Settings {
             theme: theme_default(),
             accent: accent_default(),
             tabs: Tabs::default(),
+        }
+    }
+}
+
+/// A named snapshot of the tabs that were open in the host. Windows are stored
+/// by executable path plus a title hint, never by HWND (an HWND is meaningless
+/// across runs).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedSet {
+    pub name: String,
+    #[serde(default)]
+    pub tabs: Vec<SavedTab>,
+}
+
+/// One tab inside a [`SavedSet`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedTab {
+    #[serde(default)]
+    pub exe_path: String,
+    #[serde(default)]
+    pub exe_name: String,
+    #[serde(default)]
+    pub title_hint: String,
+}
+
+/// The persisted collection of saved tab sets (`slate\sets.json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedSets {
+    #[serde(default = "schema_version")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub sets: Vec<SavedSet>,
+}
+
+impl Default for SavedSets {
+    fn default() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            sets: Vec::new(),
         }
     }
 }
@@ -82,6 +125,7 @@ struct PartialTabs {
     icons: Option<bool>,
     count_badge: Option<bool>,
     hover_preview: Option<bool>,
+    show_bar: Option<bool>,
 }
 
 fn schema_version() -> u32 {
@@ -124,9 +168,9 @@ pub fn settings_path() -> PathBuf {
     app_dir().join("settings.json")
 }
 
-#[allow(dead_code)] // used by saved groups (later phase)
-pub fn groups_path() -> PathBuf {
-    app_dir().join("groups.json")
+/// `slate\sets.json` — the saved tab sets.
+pub fn sets_path() -> PathBuf {
+    app_dir().join("sets.json")
 }
 
 pub fn logs_dir() -> PathBuf {
@@ -161,6 +205,9 @@ pub fn ensure() {
     if !settings_path().exists() {
         seed("slate\\settings.json", &settings_path(), &AppSeed);
     }
+    if !sets_path().exists() {
+        seed("slate\\sets.json", &sets_path(), &SetsSeed);
+    }
 }
 
 /// Writes `path` from `configs\<template>` if present, else from `seed_content`.
@@ -186,6 +233,14 @@ impl Seed for AppSeed {
                 s
             })
             .unwrap_or_else(|_| "{}\n".to_string())
+    }
+}
+
+struct SetsSeed;
+
+impl Seed for SetsSeed {
+    fn content(&self) -> String {
+        "{ \"schema_version\": 1, \"sets\": [] }\n".to_string()
     }
 }
 
@@ -219,6 +274,39 @@ pub fn save(settings: &Settings) {
     };
     json.push('\n');
     atomic_write(&settings_path(), json.as_bytes());
+}
+
+/// Load the saved tab sets. A missing file yields an empty set; a corrupt one is
+/// backed up and treated as empty rather than crashing.
+pub fn load_sets() -> SavedSets {
+    let path = sets_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return SavedSets::default();
+    };
+    let value: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(_) => {
+            backup(&path);
+            return SavedSets::default();
+        }
+    };
+    match serde_json::from_value(migrate(value)) {
+        Ok(sets) => sets,
+        Err(_) => {
+            backup(&path);
+            SavedSets::default()
+        }
+    }
+}
+
+/// Persist the saved tab sets atomically, creating the directory if needed.
+pub fn save_sets(sets: &SavedSets) {
+    let _ = std::fs::create_dir_all(app_dir());
+    let Ok(mut json) = serde_json::to_string_pretty(sets) else {
+        return;
+    };
+    json.push('\n');
+    atomic_write(&sets_path(), json.as_bytes());
 }
 
 /// Read one file into its partial form; a corrupt file is backed up and ignored.
@@ -257,6 +345,9 @@ fn apply(settings: &mut Settings, partial: PartialSettings) {
         }
         if let Some(hover_preview) = tabs.hover_preview {
             settings.tabs.hover_preview = hover_preview;
+        }
+        if let Some(show_bar) = tabs.show_bar {
+            settings.tabs.show_bar = show_bar;
         }
     }
 }
@@ -364,5 +455,25 @@ mod tests {
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.theme, s.theme);
         assert_eq!(back.tabs.icons, s.tabs.icons);
+    }
+
+    #[test]
+    fn saved_sets_round_trip() {
+        let sets = SavedSets {
+            schema_version: SCHEMA_VERSION,
+            sets: vec![SavedSet {
+                name: "Work".into(),
+                tabs: vec![SavedTab {
+                    exe_path: "C:\\x\\chrome.exe".into(),
+                    exe_name: "chrome.exe".into(),
+                    title_hint: "Tab".into(),
+                }],
+            }],
+        };
+        let json = serde_json::to_string(&sets).unwrap();
+        let back: SavedSets = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sets.len(), 1);
+        assert_eq!(back.sets[0].name, "Work");
+        assert_eq!(back.sets[0].tabs[0].exe_name, "chrome.exe");
     }
 }

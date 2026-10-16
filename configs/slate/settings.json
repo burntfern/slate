@@ -5,6 +5,7 @@
   "tabs": {
     "icons": true,
     "count_badge": true,
-    "hover_preview": true
+    "hover_preview": true,
+    "show_bar": true
   }
 }

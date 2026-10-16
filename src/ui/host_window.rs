@@ -23,7 +23,7 @@ use gpui::{
     Pixels, Point, Render, RenderImage, SharedString, Size, Styled, Subscription, Window,
 };
 
-use crate::controller::{Cmd, Controller, HoverPreview, TabInfo};
+use crate::controller::{Cmd, Controller, HoverPreview, SavedPrompt, TabInfo};
 use crate::core::TabId;
 use crate::ui::tab_bar::{SlateTab, SlateTabBar, TabIcon};
 
@@ -57,11 +57,10 @@ fn overlay_layer(
     const MARGIN: f32 = 8.0;
     // Keep the panel inside the window: right-align it when the anchor is close
     // to the right edge (the `+` and chevron both live there).
-    let left = at
-        .x
-        .as_f32()
-        .min(viewport.width.as_f32() - width - MARGIN)
-        .max(0.0);
+    let left =
+        at.x.as_f32()
+            .min(viewport.width.as_f32() - width - MARGIN)
+            .max(0.0);
     div()
         .absolute()
         .left(px(left))
@@ -91,6 +90,11 @@ pub struct HostWindow {
     /// The tab whose title was last loaded into `rename_field`, so we only
     /// reset the text when the dialog opens for a new target.
     rename_primed: Option<TabId>,
+    /// The saved-set name prompt's input box, created on first use.
+    saved_field: Option<Entity<TextInput>>,
+    /// The prompt (save vs rename) whose text is currently loaded into
+    /// `saved_field`, so we only reset the text when the prompt changes target.
+    saved_primed: Option<SavedPrompt>,
     _observe: Subscription,
     /// Re-render whenever the controller mutates (tab add/remove/retitle, live
     /// events). Without this the strip only refreshes on direct interaction.
@@ -111,6 +115,8 @@ impl HostWindow {
             empty_icon: grayscale_mark(),
             rename_field: None,
             rename_primed: None,
+            saved_field: None,
+            saved_primed: None,
             _observe,
             _observe_controller,
         }
@@ -143,7 +149,12 @@ fn empty_state(cx: &App, icon: Option<Arc<RenderImage>>, caption: &str, hint: &s
         .justify_center()
         .gap_3()
         .when_some(icon, |empty, icon| {
-            empty.child(Image::new("empty-mark", icon).w(px(128.0)).h(px(128.0)).opacity(0.18))
+            empty.child(
+                Image::new("empty-mark", icon)
+                    .w(px(128.0))
+                    .h(px(128.0))
+                    .opacity(0.18),
+            )
         })
         .child(Caption::new(caption.to_string()))
         .child(
@@ -192,7 +203,11 @@ fn hover_card(
             .justify_center()
             .bg(colors.sunken)
             .when_some(tab.and_then(|t| t.icon.clone()), |area, icon| {
-                area.child(Image::new(("host-hover-icon", 0usize), icon).w(px(48.0)).h(px(48.0)))
+                area.child(
+                    Image::new(("host-hover-icon", 0usize), icon)
+                        .w(px(48.0))
+                        .h(px(48.0)),
+                )
             })
             .into_any_element(),
     };
@@ -209,7 +224,11 @@ fn hover_card(
         .border_t_1()
         .border_color(colors.border)
         .when_some(tab.and_then(|t| t.icon.clone()), |row, icon| {
-            row.child(Image::new(("host-hover-tab-icon", 0usize), icon).w(px(16.0)).h(px(16.0)))
+            row.child(
+                Image::new(("host-hover-tab-icon", 0usize), icon)
+                    .w(px(16.0))
+                    .h(px(16.0)),
+            )
         })
         .child(
             div()
@@ -293,15 +312,21 @@ impl Render for HostWindow {
 
         let mut tab_bar = SlateTabBar::new("host-tabs");
         let palette = cx.theme().palette();
-        for TabInfo { id, title, icon, accent, .. } in &info.tabs {
+        for TabInfo {
+            id,
+            title,
+            icon,
+            accent,
+            ..
+        } in &info.tabs
+        {
             let icon = match (info.icons_in_tabs, icon) {
                 (true, Some(image)) => TabIcon::Real(image.clone()),
                 _ => TabIcon::Glyph(IconName::AppWindow),
             };
             let color = accent.map(|index| palette.hue(index, "tab accent"));
-            tab_bar = tab_bar.tab(
-                SlateTab::new(id.0.to_string(), title.clone(), icon).accent(color),
-            );
+            tab_bar =
+                tab_bar.tab(SlateTab::new(id.0.to_string(), title.clone(), icon).accent(color));
         }
         if let Some(active) = &info.active {
             tab_bar = tab_bar.selected(SharedString::from(active.0.to_string()));
@@ -437,6 +462,15 @@ impl Render for HostWindow {
                 });
             }
         };
+        let toggle_tab_bar = {
+            let ctrl = controller.clone();
+            move |_w: &mut Window, cx: &mut App| {
+                ctrl.update(cx, |c, cx| {
+                    c.dispatch(Cmd::ToggleTabBar, cx);
+                    c.dispatch(Cmd::SetOverlay(false), cx);
+                });
+            }
+        };
         // Quit through the controller so every hosted window is unregistered and
         // restored before the process exits (a bare `process::exit` would leave
         // them frame-stripped until the janitor replays).
@@ -463,22 +497,21 @@ impl Render for HostWindow {
                     .on_click(begin_pick),
             )
             .item(MenuItem::new("Refresh window list").on_click(refresh))
-            .item(
-                MenuItem::submenu("Keyboard shortcuts", shortcuts_menu).icon(IconName::Keyboard),
-            )
+            .item(MenuItem::submenu("Keyboard shortcuts", shortcuts_menu).icon(IconName::Keyboard))
             .separator()
             .item(
                 MenuItem::check("Show window icons in tabs", info.icons_in_tabs)
                     .on_click(toggle_icons),
             )
             .item(
-                MenuItem::check("Show tab count badge", info.show_tab_badge)
-                    .on_click(toggle_badge),
+                MenuItem::check("Show tab count badge", info.show_tab_badge).on_click(toggle_badge),
             )
             .item(
                 MenuItem::check("Show hover preview", info.hover_preview_enabled)
                     .on_click(toggle_hover_preview),
             )
+            .separator()
+            .item(MenuItem::check("Hide tab bar", !info.show_tab_bar).on_click(toggle_tab_bar))
             .separator()
             .item(MenuItem::new("Quit Slate").on_click(quit));
         let menu = OverflowMenu::new("host-menu", app_menu)
@@ -499,6 +532,7 @@ impl Render for HostWindow {
             let ctrl = controller.clone();
             div()
                 .id("menu-overlay-wrap")
+                .relative()
                 .flex_none()
                 .occlude()
                 .on_click(move |_ev, _w, cx| {
@@ -514,7 +548,9 @@ impl Render for HostWindow {
         // under the chevron, and hides the member while open (an owned window
         // paints above the host, so it would cover the panel otherwise).
         let tab_anchor =
-            window.use_keyed_state(("host-tab-overflow-anchor", 0usize), cx, |_, _| Bounds::default());
+            window.use_keyed_state(("host-tab-overflow-anchor", 0usize), cx, |_, _| {
+                Bounds::default()
+            });
         let viewport = window.viewport_size();
         // The chevron panel is built here but attached to the content root later
         // (as a plain absolute child) so the title bar's drag mask can't clip it.
@@ -526,8 +562,7 @@ impl Render for HostWindow {
             let colors = &theme.colors;
             let icon_px = theme.icon_size(IconSize::Sm).to_pixels(theme.base_rem());
             let (rad_sm, rad_lg) = (theme.radius(Radius::Sm), theme.radius(Radius::Lg));
-            let (text_sm, text_xs) =
-                (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
+            let (text_sm, text_xs) = (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
             let shadow = theme.elevation(Elevation::Floating);
             let open = info.tab_menu_open;
 
@@ -572,7 +607,13 @@ impl Render for HostWindow {
                     .on_click(move |_, _w, cx| {
                         ctrl.update(cx, |c, cx| {
                             if let Some(g) = group {
-                                c.dispatch(Cmd::SelectTab { group: g, tab: tab_id }, cx);
+                                c.dispatch(
+                                    Cmd::SelectTab {
+                                        group: g,
+                                        tab: tab_id,
+                                    },
+                                    cx,
+                                );
                             }
                             c.dispatch(Cmd::SetTabMenu(false), cx);
                         });
@@ -672,13 +713,7 @@ impl Render for HostWindow {
                             .flex_none()
                             .child(chevron)
                             // Tucked into the corner so it never protrudes.
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(px(-3.0))
-                                    .right(px(-3.0))
-                                    .child(pill),
-                            )
+                            .child(div().absolute().top(px(-3.0)).right(px(-3.0)).child(pill))
                             .into_any_element()
                     } else {
                         chevron.into_any_element()
@@ -764,8 +799,7 @@ impl Render for HostWindow {
             let colors = &theme.colors;
             let icon_px = theme.icon_size(IconSize::Sm).to_pixels(theme.base_rem());
             let (rad_sm, rad_lg) = (theme.radius(Radius::Sm), theme.radius(Radius::Lg));
-            let (text_sm, text_xs) =
-                (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
+            let (text_sm, text_xs) = (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
             let shadow = theme.elevation(Elevation::Floating);
 
             let mut rows: Vec<gpui::AnyElement> = Vec::with_capacity(info.picker_rows.len() + 1);
@@ -794,9 +828,18 @@ impl Render for HostWindow {
                             });
                         }
                     })
-                    .child(Icon::new(IconName::Plus).size(IconSize::Sm).color(colors.fg_subtle))
+                    .child(
+                        Icon::new(IconName::Plus)
+                            .size(IconSize::Sm)
+                            .color(colors.fg_subtle),
+                    )
                     .child(div().flex_1().min_w_0().child("Pick a window with"))
-                    .child(div().text_size(text_xs).text_color(colors.fg_subtle).child("Tab"))
+                    .child(
+                        div()
+                            .text_size(text_xs)
+                            .text_color(colors.fg_subtle)
+                            .child("Tab"),
+                    )
                     .into_any_element(),
             );
 
@@ -839,15 +882,14 @@ impl Render for HostWindow {
                             .h(icon_px),
                     ),
                     None => el.child(
-                        Icon::new(IconName::AppWindow).size(IconSize::Sm).color(colors.fg_subtle),
+                        Icon::new(IconName::AppWindow)
+                            .size(IconSize::Sm)
+                            .color(colors.fg_subtle),
                     ),
                 };
                 // Blocked by an eligibility rule: show why instead of the exe,
                 // so the reason is legible rather than squeezed into a tag.
-                let detail = row
-                    .reason
-                    .clone()
-                    .unwrap_or_else(|| row.exe.clone());
+                let detail = row.reason.clone().unwrap_or_else(|| row.exe.clone());
                 el = el.child(
                     div()
                         .flex_1()
@@ -891,6 +933,257 @@ impl Render for HostWindow {
             ));
         }
 
+        // The Saved-tab-sets panel: save the current tabs as a named set, then
+        // restore / rename / delete. Hand-rolled like the picker; the member is
+        // hidden while it's open.
+        let saved_anchor =
+            window.use_keyed_state(("host-saved-anchor", 0usize), cx, |_, _| Bounds::default());
+        let mut saved_overlay: Option<gpui::AnyElement> = None;
+        let saved_wrap = div()
+            .id("saved-wrap")
+            .relative()
+            .flex_none()
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_ev, _w, cx| cx.stop_propagation())
+            .child(
+                IconButton::new("host-saved-sets", IconName::Layers)
+                    .tooltip("Saved tab sets")
+                    .on_click({
+                        let ctrl = controller.clone();
+                        move |_, _w, cx| {
+                            ctrl.update(cx, |c, cx| c.dispatch(Cmd::ToggleSavedMenu, cx));
+                        }
+                    }),
+            )
+            .child({
+                let anchor = saved_anchor.clone();
+                canvas(
+                    move |bounds, window, cx| {
+                        let changed =
+                            anchor.update(cx, |a, _| std::mem::replace(a, bounds) != bounds);
+                        if changed {
+                            window.request_animation_frame();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+            });
+        if info.saved_menu_open {
+            let theme = cx.theme();
+            let colors = &theme.colors;
+            let (rad_sm, rad_lg) = (theme.radius(Radius::Sm), theme.radius(Radius::Lg));
+            let (text_sm, text_xs) = (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
+            let shadow = theme.elevation(Elevation::Floating);
+            let save_enabled = !info.tabs.is_empty();
+
+            let mut rows: Vec<gpui::AnyElement> = Vec::with_capacity(info.saved_sets.len() + 2);
+
+            // Save the current tabs as a new named set (disabled with no tabs).
+            rows.push(
+                div()
+                    .id("saved-save-row")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .w_full()
+                    .px_2()
+                    .py_1()
+                    .rounded(rad_sm)
+                    .text_size(text_sm)
+                    .text_color(if save_enabled {
+                        colors.fg
+                    } else {
+                        colors.fg_subtle
+                    })
+                    .when(save_enabled, |el| {
+                        el.cursor_pointer()
+                            .hover(|style| style.bg(colors.hover))
+                            .on_click({
+                                let ctrl = controller.clone();
+                                move |_, _w, cx| {
+                                    ctrl.update(cx, |c, cx| c.dispatch(Cmd::BeginSaveSet, cx));
+                                }
+                            })
+                    })
+                    .when(!save_enabled, |el| el.opacity(0.5))
+                    .child(
+                        Icon::new(IconName::Save)
+                            .size(IconSize::Sm)
+                            .color(colors.fg_subtle),
+                    )
+                    .child(div().flex_1().min_w_0().child("Save current tabs\u{2026}"))
+                    .into_any_element(),
+            );
+
+            for (ix, set) in info.saved_sets.iter().enumerate() {
+                let restore = {
+                    let ctrl = controller.clone();
+                    move |_: &gpui::ClickEvent, _w: &mut Window, cx: &mut App| {
+                        ctrl.update(cx, |c, cx| {
+                            c.dispatch(Cmd::RestoreSet { index: ix }, cx);
+                            c.dispatch(Cmd::SetSavedMenu(false), cx);
+                        });
+                    }
+                };
+                let rename = {
+                    let ctrl = controller.clone();
+                    move |_: &gpui::ClickEvent, _w: &mut Window, cx: &mut App| {
+                        ctrl.update(cx, |c, cx| {
+                            c.dispatch(Cmd::BeginRenameSet { index: ix }, cx)
+                        });
+                    }
+                };
+                let delete = {
+                    let ctrl = controller.clone();
+                    move |_: &gpui::ClickEvent, _w: &mut Window, cx: &mut App| {
+                        ctrl.update(cx, |c, cx| c.dispatch(Cmd::DeleteSet { index: ix }, cx));
+                    }
+                };
+                let closed = set.count.saturating_sub(set.available);
+                let detail = if closed == 0 {
+                    format!("{} available", set.available)
+                } else if set.available == 0 {
+                    format!("{closed} closed")
+                } else {
+                    format!("{} available \u{00b7} {closed} closed", set.available)
+                };
+                // Dim a set whose windows are all closed: clicking it will do
+                // nothing until the apps are reopened.
+                let detail_color = if set.available == 0 {
+                    colors.fg_subtle
+                } else {
+                    colors.fg_muted
+                };
+                rows.push(
+                    div()
+                        .id(("saved-row", ix))
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .w_full()
+                        .rounded(rad_sm)
+                        .hover(|style| style.bg(colors.hover))
+                        .child(
+                            // The whole left/center is one restore target; the
+                            // hover highlight lives on the row so it stays
+                            // uniform across the row.
+                            div()
+                                .id(("saved-restore", ix))
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .flex_1()
+                                .min_w_0()
+                                .px_2()
+                                .py_1()
+                                .cursor_pointer()
+                                .on_click(restore)
+                                .child(
+                                    Icon::new(IconName::FolderOpen)
+                                        .size(IconSize::Sm)
+                                        .color(colors.fg_subtle),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(text_sm)
+                                        .text_color(if set.available == 0 {
+                                            colors.fg_muted
+                                        } else {
+                                            colors.fg
+                                        })
+                                        .child(Ellipsis::new(set.name.clone()))
+                                        .child(
+                                            div()
+                                                .text_size(text_xs)
+                                                .text_color(detail_color)
+                                                .child(detail),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap_0p5()
+                                .px_1()
+                                .occlude()
+                                .child(
+                                    div()
+                                        .id(("saved-rename", ix))
+                                        .p_1()
+                                        .rounded(rad_sm)
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(colors.hover))
+                                        .on_click(rename)
+                                        .child(
+                                            Icon::new(IconName::Pencil)
+                                                .size(IconSize::Sm)
+                                                .color(colors.fg_muted),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id(("saved-delete", ix))
+                                        .p_1()
+                                        .rounded(rad_sm)
+                                        .cursor_pointer()
+                                        .hover(|style| style.bg(colors.hover))
+                                        .on_click(delete)
+                                        .child(
+                                            Icon::new(IconName::Trash2)
+                                                .size(IconSize::Sm)
+                                                .color(colors.danger),
+                                        ),
+                                ),
+                        )
+                        .into_any_element(),
+                );
+            }
+
+            if info.saved_sets.is_empty() {
+                rows.push(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_size(text_xs)
+                        .text_color(colors.fg_subtle)
+                        .child("No saved sets yet")
+                        .into_any_element(),
+                );
+            }
+
+            let panel = div()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .p_1()
+                .w(px(280.0))
+                .rounded(rad_lg)
+                .bg(colors.overlay)
+                .border_1()
+                .border_color(colors.border)
+                .shadow(shadow)
+                .children(rows);
+
+            let at = saved_anchor.read(cx).bottom_left();
+            saved_overlay = Some(overlay_layer(
+                "host-saved",
+                at,
+                280.0,
+                viewport,
+                enter_animation(cx),
+                panel,
+            ));
+        }
+
+
         // The tab right-click menu. Hand-rolled for the same occlusion reason:
         // ely's `ContextMenu` panel would sit under a hosted member.
         let tab_menu_panel = info.tab_menu.as_ref().and_then(|menu| {
@@ -899,8 +1192,7 @@ impl Render for HostWindow {
             let theme = cx.theme();
             let colors = &theme.colors;
             let (rad_sm, rad_lg) = (theme.radius(Radius::Sm), theme.radius(Radius::Lg));
-            let (text_sm, text_xs) =
-                (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
+            let (text_sm, text_xs) = (theme.text_size(TextSize::Sm), theme.text_size(TextSize::Xs));
             let row_h = theme.control_height(ControlSize::Md);
             let shadow = theme.elevation(Elevation::Floating);
             let ix = info.tabs.iter().position(|t| t.id == tab);
@@ -914,8 +1206,16 @@ impl Render for HostWindow {
                         danger: bool,
                         enabled: bool,
                         run: Action| {
-                let text_color = if danger { colors.danger } else { colors.fg_muted };
-                let icon_color = if danger { colors.danger } else { colors.fg_subtle };
+                let text_color = if danger {
+                    colors.danger
+                } else {
+                    colors.fg_muted
+                };
+                let icon_color = if danger {
+                    colors.danger
+                } else {
+                    colors.fg_subtle
+                };
                 div()
                     .id(id)
                     .flex()
@@ -942,21 +1242,17 @@ impl Render for HostWindow {
                         }
                     })
                     .child(Icon::new(icon).size(IconSize::Sm).color(icon_color))
-                    .child(
-                        div()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .child(label)
-                            .when_some(desc, |el, text| {
-                                el.child(
-                                    div()
-                                        .text_size(text_xs)
-                                        .text_color(colors.fg_subtle)
-                                        .child(text),
-                                )
-                            }),
-                    )
+                    .child(div().flex_col().flex_1().min_w_0().child(label).when_some(
+                        desc,
+                        |el, text| {
+                            el.child(
+                                div()
+                                    .text_size(text_xs)
+                                    .text_color(colors.fg_subtle)
+                                    .child(text),
+                            )
+                        },
+                    ))
             };
 
             // Ungroup: return the window to a standalone top-level window.
@@ -1032,9 +1328,8 @@ impl Render for HostWindow {
 
             // Non-destructive actions first, then a divider, then the
             // destructive Close pinned to the bottom.
-            let divider = |id: &'static str| {
-                div().id(id).my_1().h(px(1.0)).w_full().bg(colors.border)
-            };
+            let divider =
+                |id: &'static str| div().id(id).my_1().h(px(1.0)).w_full().bg(colors.border);
 
             // Color: a thin strip laid out like the tab's top edge. The first
             // segment is "no color" — the plain default tab. Picking a hue sets
@@ -1224,7 +1519,10 @@ impl Render for HostWindow {
             let theme = cx.theme();
             let rem = theme.base_rem();
             let bar = theme.titlebar_height().to_pixels(rem).as_f32();
-            let icon = theme.control_height(ControlSize::Md).to_pixels(rem).as_f32();
+            let icon = theme
+                .control_height(ControlSize::Md)
+                .to_pixels(rem)
+                .as_f32();
             ((bar - icon) / 2.0).max(0.0)
         };
         // Left of the bar is the app menu only; the tabs take the middle; the
@@ -1277,10 +1575,11 @@ impl Render for HostWindow {
                     .min_w_0()
                     .h_full()
                     .items_center()
-                    .child(tab_bar),
+                    .when(info.show_tab_bar, |el| el.child(tab_bar)),
             )
             .child(pick_slot)
             .child(tab_overflow)
+            .child(saved_wrap)
             .child(make_theme())
             .child(div().flex_none().w(px(64.0)))
             .child(div().flex_none().occlude().child(controls));
@@ -1290,10 +1589,11 @@ impl Render for HostWindow {
         // overlay is no longer wanted: close it and re-show the hosted member.
         let dismiss = {
             let ctrl = controller.clone();
-            let (overlay, tab_menu, picker, ctx) = (
+            let (overlay, tab_menu, picker, saved, ctx) = (
                 info.overlay,
                 info.tab_menu_open,
                 info.picker_open,
+                info.saved_menu_open,
                 info.tab_menu.is_some(),
             );
             move |_ev: &gpui::MouseDownEvent, _w: &mut Window, cx: &mut App| {
@@ -1306,6 +1606,9 @@ impl Render for HostWindow {
                     }
                     if picker {
                         c.dispatch(Cmd::SetPickerOpen(false), cx);
+                    }
+                    if saved {
+                        c.dispatch(Cmd::SetSavedMenu(false), cx);
                     }
                     if ctx {
                         c.dispatch(Cmd::CloseTabMenu, cx);
@@ -1326,7 +1629,9 @@ impl Render for HostWindow {
                         c.dispatch(Cmd::SetOverlay(false), cx);
                         c.dispatch(Cmd::SetTabMenu(false), cx);
                         c.dispatch(Cmd::SetPickerOpen(false), cx);
+                        c.dispatch(Cmd::SetSavedMenu(false), cx);
                         c.dispatch(Cmd::CancelRename, cx);
+                        c.dispatch(Cmd::CancelSavedPrompt, cx);
                     });
                 }
             }
@@ -1347,8 +1652,10 @@ impl Render for HostWindow {
         let overlaying = info.overlay
             || info.tab_menu_open
             || info.picker_open
+            || info.saved_menu_open
             || info.tab_menu.is_some()
             || info.renaming.is_some()
+            || info.saved_prompt.is_some()
             || info.hover_preview.is_some();
         let body = match (info.tabs.is_empty(), overlaying) {
             (true, _) => empty_state(
@@ -1416,17 +1723,12 @@ impl Render for HostWindow {
                 });
             }
             Some(
-                PromptDialog::new(
-                    ("host-rename", 0usize),
-                    "Rename tab",
-                    &field,
-                    {
-                        let ctrl = controller.clone();
-                        move |_w, cx| {
-                            ctrl.update(cx, |c, cx| c.dispatch(Cmd::CancelRename, cx));
-                        }
-                    },
-                )
+                PromptDialog::new(("host-rename", 0usize), "Rename tab", &field, {
+                    let ctrl = controller.clone();
+                    move |_w, cx| {
+                        ctrl.update(cx, |c, cx| c.dispatch(Cmd::CancelRename, cx));
+                    }
+                })
                 .label("Tab name")
                 .submit("Rename")
                 .check(|text: &str| {
@@ -1441,7 +1743,14 @@ impl Render for HostWindow {
                     move |text, _w, cx| {
                         let title = text.to_string();
                         ctrl.update(cx, |c, cx| {
-                            c.dispatch(Cmd::RenameTab { group, tab: tab_id, title }, cx);
+                            c.dispatch(
+                                Cmd::RenameTab {
+                                    group,
+                                    tab: tab_id,
+                                    title,
+                                },
+                                cx,
+                            );
                             c.dispatch(Cmd::CancelRename, cx);
                         });
                     }
@@ -1451,6 +1760,74 @@ impl Render for HostWindow {
         } else {
             // Dialog closed: forget the priming so reopening reloads the title.
             self.rename_primed = None;
+            None
+        };
+
+        // Save/rename a saved tab set, via ely's `PromptDialog` (the member is
+        // hidden while it's open, like the rename dialog).
+        let saved_dialog = if let Some(prompt) = info.saved_prompt {
+            let field = self
+                .saved_field
+                .get_or_insert_with(|| cx.new(|cx| TextInput::new(window, cx)))
+                .clone();
+            // Prime the box once per prompt: empty for Save, the current name
+            // (selected) for Rename.
+            if self.saved_primed != Some(prompt) {
+                self.saved_primed = Some(prompt);
+                let current = match prompt {
+                    SavedPrompt::Save => String::new(),
+                    SavedPrompt::Rename(ix) => info
+                        .saved_sets
+                        .get(ix)
+                        .map(|s| s.name.clone())
+                        .unwrap_or_default(),
+                };
+                let end = current.len();
+                field.update(cx, |f, cx| {
+                    f.set_text(current, cx);
+                    f.select(0..end, cx);
+                });
+            }
+            let (title, label, submit) = match prompt {
+                SavedPrompt::Save => ("Save tab set", "Set name", "Save"),
+                SavedPrompt::Rename(_) => ("Rename tab set", "Set name", "Rename"),
+            };
+            Some(
+                PromptDialog::new(("host-saved-prompt", 0usize), title, &field, {
+                    let ctrl = controller.clone();
+                    move |_w, cx| {
+                        ctrl.update(cx, |c, cx| c.dispatch(Cmd::CancelSavedPrompt, cx));
+                    }
+                })
+                .label(label)
+                .submit(submit)
+                .check(|text: &str| {
+                    if text.trim().is_empty() {
+                        Err(SharedString::from("Name cannot be empty"))
+                    } else {
+                        Ok(())
+                    }
+                })
+                .on_submit({
+                    let ctrl = controller.clone();
+                    move |text, _w, cx| {
+                        let name = text.to_string();
+                        ctrl.update(cx, |c, cx| {
+                            match prompt {
+                                SavedPrompt::Save => c.dispatch(Cmd::CommitSaveSet { name }, cx),
+                                SavedPrompt::Rename(index) => {
+                                    c.dispatch(Cmd::CommitRenameSet { index, name }, cx)
+                                }
+                            }
+                            c.dispatch(Cmd::CancelSavedPrompt, cx);
+                        });
+                    }
+                })
+                .into_any_element(),
+            )
+        } else {
+            // Dialog closed: forget the priming so reopening reloads the name.
+            self.saved_primed = None;
             None
         };
 
@@ -1483,7 +1860,13 @@ impl Render for HostWindow {
         if let Some(overlay) = tab_menu_overlay {
             content = content.child(overlay);
         }
+        if let Some(overlay) = saved_overlay {
+            content = content.child(overlay);
+        }
         if let Some(dialog) = rename_dialog {
+            content = content.child(dialog);
+        }
+        if let Some(dialog) = saved_dialog {
             content = content.child(dialog);
         }
         content

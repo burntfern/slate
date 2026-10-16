@@ -2,11 +2,10 @@
 //! Explorer, the taskbar and Alt+Tab show the logo even before the window sets
 //! it.
 //!
-//! The candidate selected by the `SLATE_ICON` env var (default `s2`) is
+//! The candidate selected by the `SLATE_ICON` env var (default `slate`) is
 //! embedded as the app icon. A candidate is either a `<name>.png` (turned into
 //! a multi-size PNG-compressed `.ico`) or a ready-made `<name>.ico`. PNG
-//! candidates also get their `.ico` written to `assets/icons/<name>.ico` for
-//! side-by-side comparison.
+//! candidates also get their `.ico` written to `assets/icons/<name>.ico`.
 //!
 //! The resolved source path of the selected logo is exported as `SLATE_LOGO`
 //! via `rustc-env`, so the runtime window icon and the empty-state mark embed
@@ -15,12 +14,12 @@
 //! Candidates are looked up by name in the repo root, `assets/`, or
 //! `assets/icons/`.
 //!
-//! Pick one with: `$env:SLATE_ICON = "s2"; cargo build`
+//! Pick one with: `$env:SLATE_ICON = "slate"; cargo build`
 
 /// Candidate logo names (without extension), searched in `LOGO_DIRS`.
-const LOGO_SOURCES: &[&str] = &["s1", "s2", "s3"];
+const LOGO_SOURCES: &[&str] = &["slate"];
 /// Used when `SLATE_ICON` is unset or names an unknown candidate.
-const DEFAULT_LOGO: &str = "s2";
+const DEFAULT_LOGO: &str = "slate";
 /// Directories (repo-relative) searched for `<name>.<ext>`, in order.
 const LOGO_DIRS: &[&str] = &["", "assets", "assets/icons"];
 /// Extensions searched, in order.

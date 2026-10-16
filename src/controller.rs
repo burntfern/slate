@@ -4,13 +4,13 @@
 //! windows, registers members with the hosting engine, keeps `GroupSet` state,
 //! and publishes the current host layout to the reposition worker (spec 01).
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
 use ely_gpui_component::feedback::{Toast, Toaster};
 use ely_gpui_component::primitives::Severity;
 use ely_gpui_component::theme::{ActiveTheme, Mode, Theme};
 use gpui::{AppContext, Context, Entity, RenderImage};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// How long the pointer must rest on a tab before the hover card opens, and how
 /// long it may stray before the card closes. Matches ely's `HoverCard`.
@@ -20,11 +20,11 @@ const PREVIEW_LINGER_MS: u64 = 200;
 use crate::config;
 use crate::core::{Effect, GroupId, GroupSet, TabId, WindowIdentity};
 use crate::win::{
-    activate_window, capture_window, close_window, content_rect_screen, ctrl_held, enumerate_windows,
-    install_window_icon, is_blacklisted, register_member, set_owned, unregister_member, window_icon,
-    window_rect, window_title, window_under_cursor, Highlight, HostWorker, IconPixels, Janitor,
-    KeyboardCapture, PickKey, Shortcut, ShortcutCapture, StylingState, WinEvent, WinEventPump,
-    WindowSnapshot,
+    activate_window, capture_window, close_window, content_rect_screen, ctrl_held,
+    enumerate_windows, install_window_icon, is_blacklisted, register_member, set_owned,
+    unregister_member, window_icon, window_rect, window_title, window_under_cursor, Highlight,
+    HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey, Shortcut, ShortcutCapture,
+    StylingState, WinEvent, WinEventPump, WindowSnapshot,
 };
 
 /// UI → controller intent. The UI never calls Win32 directly.
@@ -73,25 +73,75 @@ pub enum Cmd {
     /// so a click that outpaces a re-render can't reopen an already-open panel.
     ToggleTabMenu,
     /// Host a specific enumerated window (chosen from the `+` picker).
-    AddWindow { hwnd: isize },
+    AddWindow {
+        hwnd: isize,
+    },
     /// Close every tab in the group except `tab`.
-    CloseOtherTabs { group: GroupId, tab: TabId },
+    CloseOtherTabs {
+        group: GroupId,
+        tab: TabId,
+    },
     /// Close every tab to the right of `tab`.
-    CloseTabsToRight { group: GroupId, tab: TabId },
-    /// Close every tab to the left of `tab`.
-    CloseTabsToLeft { group: GroupId, tab: TabId },
+    CloseTabsToRight {
+        group: GroupId,
+        tab: TabId,
+    },
+    /// Close every tab in the active group.
+    CloseTabsToLeft {
+        group: GroupId,
+        tab: TabId,
+    },
     /// Open the tab right-click menu at a window-space point (hides the member
     /// while open, like the other overlays).
-    OpenTabMenu { tab: TabId, at: (f32, f32) },
+    OpenTabMenu {
+        tab: TabId,
+        at: (f32, f32),
+    },
     CloseTabMenu,
     /// Open the rename prompt for a tab.
-    BeginRename { group: GroupId, tab: TabId },
+    BeginRename {
+        group: GroupId,
+        tab: TabId,
+    },
     CancelRename,
     /// Set a tab's display title override (empty clears it).
-    RenameTab { group: GroupId, tab: TabId, title: String },
+    RenameTab {
+        group: GroupId,
+        tab: TabId,
+        title: String,
+    },
     /// Open/close the `+` window picker (hides the member while open).
     SetPickerOpen(bool),
     TogglePicker,
+    /// Open/close the Saved-tab-sets panel (hides the member while open).
+    SetSavedMenu(bool),
+    /// Flip the Saved-tab-sets panel from its current value.
+    ToggleSavedMenu,
+    /// Open the name prompt to save the current tabs as a new set.
+    BeginSaveSet,
+    /// Open the name prompt to rename the set at `index`.
+    BeginRenameSet {
+        index: usize,
+    },
+    /// Dismiss the save/rename name prompt.
+    CancelSavedPrompt,
+    /// Commit the save prompt with `name`.
+    CommitSaveSet {
+        name: String,
+    },
+    /// Commit the rename prompt for the set at `index` with `name`.
+    CommitRenameSet {
+        index: usize,
+        name: String,
+    },
+    /// Add every running window matching the set at `index` back as tabs.
+    RestoreSet {
+        index: usize,
+    },
+    /// Delete the set at `index`.
+    DeleteSet {
+        index: usize,
+    },
     /// Show/hide the tab-count badge on the overflow chevron.
     ToggleTabBadge,
     /// Show/hide the hover preview card.
@@ -112,10 +162,14 @@ pub enum Cmd {
         anchor: (f32, f32, f32, f32),
     },
     /// Pointer left `tab`: linger, then hide the card.
-    PreviewHide { tab: TabId },
+    PreviewHide {
+        tab: TabId,
+    },
     /// The pointer entered (`true`) or left (`false`) the card itself.
     PreviewCardHover(bool),
     Shutdown,
+    /// Show/hide the whole tab strip.
+    ToggleTabBar,
 }
 
 /// A user-facing transient message. Slate keeps exactly one of these — the
@@ -180,6 +234,12 @@ pub struct HostInfo {
     pub picker_open: bool,
     /// Rows for the `+` picker (running windows + eligibility).
     pub picker_rows: Vec<PickerRow>,
+    /// True while the Saved-tab-sets panel is open and the member is hidden.
+    pub saved_menu_open: bool,
+    /// The saved sets, for the panel.
+    pub saved_sets: Vec<SavedSetInfo>,
+    /// The save/rename name prompt, if open.
+    pub saved_prompt: Option<SavedPrompt>,
     /// The tab right-click menu's target and window-space position, if open.
     pub tab_menu: Option<TabMenu>,
     /// The tab currently being renamed, if any.
@@ -188,6 +248,8 @@ pub struct HostInfo {
     pub picking: bool,
     /// The hover preview card to draw over the (now hidden) content area.
     pub hover_preview: Option<HoverPreview>,
+    /// Show the tab strip (false hides it entirely).
+    pub show_tab_bar: bool,
 }
 
 /// The tab right-click menu: which tab, and where it was requested.
@@ -206,6 +268,25 @@ pub struct PickerRow {
     pub icon: Option<Arc<RenderImage>>,
     /// `Some` when the window can't be hosted; the string is the reason.
     pub reason: Option<String>,
+}
+
+/// One row of the Saved-tab-sets panel.
+#[derive(Clone)]
+pub struct SavedSetInfo {
+    pub name: String,
+    /// Total tabs stored in the set.
+    pub count: usize,
+    /// How many of those tabs have a matching window running right now (and not
+    /// already hosted). The rest are "closed" — attach-only, so they won't open.
+    pub available: usize,
+}
+
+/// The Saved-tab-sets inline name prompt: saving the current tabs as a new set,
+/// or renaming an existing one (`index` into the controller's list).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SavedPrompt {
+    Save,
+    Rename(usize),
 }
 
 /// The hover preview card: which tab it mirrors, where it hangs (`anchor`, the
@@ -234,7 +315,7 @@ pub struct Controller {
     capture: Option<KeyboardCapture>,
     /// Ring drawn over the window the pointer is on while picking.
     highlight: Option<Highlight>,
-    settings: config::Settings,
+    pub settings: config::Settings,
     icons: HashMap<isize, Option<Arc<RenderImage>>>,
     overlay: bool,
     /// True while the tab-overflow dropdown is open; like `overlay`, it hides the
@@ -244,6 +325,12 @@ pub struct Controller {
     picker_open: bool,
     /// Cached rows for the `+` picker, rebuilt each time it opens.
     picker_rows: Vec<PickerRow>,
+    /// Saved tab sets, loaded from `slate\sets.json` at startup.
+    saved_sets: Vec<config::SavedSet>,
+    /// True while the Saved-tab-sets panel is open (hides the member).
+    saved_menu_open: bool,
+    /// The save/rename name prompt, if open.
+    saved_prompt: Option<SavedPrompt>,
     /// The tab right-click menu's target and position, if open.
     tab_menu: Option<TabMenu>,
     /// The tab being renamed, if any (opens the rename prompt).
@@ -267,6 +354,8 @@ pub struct Controller {
     snapshots: HashMap<isize, Arc<RenderImage>>,
     /// Persistent global-shortcut hook (Ctrl+Tab family); drained in `tick`.
     shortcuts: Option<ShortcutCapture>,
+    /// The system-tray icon; left-click restores the host, right-click exits.
+    tray: Option<crate::win::TrayIcon>,
     /// The foreign window currently being dragged, watched for the Ctrl-drag
     /// "add as tab" gesture (drop it over the host while Ctrl is held).
     drag: Option<isize>,
@@ -300,6 +389,9 @@ impl Controller {
             tab_menu_open: false,
             picker_open: false,
             picker_rows: Vec::new(),
+            saved_sets: config::load_sets().sets,
+            saved_menu_open: false,
+            saved_prompt: None,
             tab_menu: None,
             renaming: None,
             rename_overrides: HashMap::new(),
@@ -310,6 +402,7 @@ impl Controller {
             preview_gen: 0,
             snapshots: HashMap::new(),
             shortcuts: ShortcutCapture::install(),
+            tray: crate::win::TrayIcon::start(),
             drag: None,
             drag_active: false,
             _pump: WinEventPump::install(),
@@ -390,10 +483,22 @@ impl Controller {
             tab_menu_open: self.tab_menu_open,
             picker_open: self.picker_open,
             picker_rows: self.picker_rows.clone(),
+            saved_menu_open: self.saved_menu_open,
+            saved_sets: self
+                .saved_sets
+                .iter()
+                .map(|s| SavedSetInfo {
+                    name: s.name.clone(),
+                    count: s.tabs.len(),
+                    available: self.set_available(s),
+                })
+                .collect(),
+            saved_prompt: self.saved_prompt,
             tab_menu: self.tab_menu.clone(),
             renaming: self.renaming.map(|(_, tab)| tab),
             picking: self.picking,
             hover_preview: self.hover_preview.clone(),
+            show_tab_bar: self.settings.tabs.show_bar,
         }
     }
 
@@ -413,6 +518,9 @@ impl Controller {
                 self.host_hwnd = Some(hwnd);
                 self.titlebar = titlebar;
                 install_window_icon(hwnd);
+                if let Some(tray) = &self.tray {
+                    tray.set_host(hwnd);
+                }
                 self.worker.start();
                 self.worker.install_move_tracker(hwnd);
             }
@@ -428,6 +536,7 @@ impl Controller {
                 self.tab_menu_open = open;
                 if open {
                     self.picker_open = false;
+                    self.saved_menu_open = false;
                     self.tab_menu = None;
                 }
             }
@@ -435,6 +544,7 @@ impl Controller {
                 self.tab_menu_open = !self.tab_menu_open;
                 if self.tab_menu_open {
                     self.picker_open = false;
+                    self.saved_menu_open = false;
                     self.tab_menu = None;
                 }
             }
@@ -446,6 +556,7 @@ impl Controller {
                 self.tab_menu = Some(TabMenu { tab, at });
                 self.tab_menu_open = false;
                 self.picker_open = false;
+                self.saved_menu_open = false;
             }
             Cmd::CloseTabMenu => self.tab_menu = None,
             Cmd::BeginRename { group, tab } => {
@@ -459,6 +570,26 @@ impl Controller {
                 let open = !self.picker_open;
                 self.set_picker_open(open);
             }
+            Cmd::SetSavedMenu(open) => self.set_saved_menu(open),
+            Cmd::ToggleSavedMenu => {
+                let open = !self.saved_menu_open;
+                self.set_saved_menu(open);
+            }
+            Cmd::BeginSaveSet => {
+                self.saved_menu_open = false;
+                self.saved_prompt = Some(SavedPrompt::Save);
+            }
+            Cmd::BeginRenameSet { index } => {
+                if index < self.saved_sets.len() {
+                    self.saved_menu_open = false;
+                    self.saved_prompt = Some(SavedPrompt::Rename(index));
+                }
+            }
+            Cmd::CancelSavedPrompt => self.saved_prompt = None,
+            Cmd::CommitSaveSet { name } => self.commit_save_set(name),
+            Cmd::CommitRenameSet { index, name } => self.commit_rename_set(index, name),
+            Cmd::RestoreSet { index } => self.restore_set(index),
+            Cmd::DeleteSet { index } => self.delete_set(index),
             Cmd::ToggleTabBadge => self.toggle_tab_badge(),
             Cmd::ToggleHoverPreview => self.toggle_hover_preview(),
             Cmd::ToggleTheme => self.toggle_theme(cx),
@@ -467,6 +598,10 @@ impl Controller {
             Cmd::PreviewHide { tab } => self.preview_unhover(tab, cx),
             Cmd::PreviewCardHover(hovered) => self.preview_card_hover(hovered, cx),
             Cmd::Shutdown => self.shutdown(),
+            Cmd::ToggleTabBar => {
+                self.settings.tabs.show_bar = !self.settings.tabs.show_bar;
+                self.save_settings();
+            }
         }
         self.sync_worker();
         cx.notify();
@@ -716,11 +851,12 @@ impl Controller {
         let Some(group) = self.active_group else {
             return false;
         };
-        let Some((active, ids)) = self
-            .groups
-            .group(group)
-            .map(|g| (g.active, g.tabs.iter().map(|t| t.id).collect::<Vec<TabId>>()))
-        else {
+        let Some((active, ids)) = self.groups.group(group).map(|g| {
+            (
+                g.active,
+                g.tabs.iter().map(|t| t.id).collect::<Vec<TabId>>(),
+            )
+        }) else {
             return false;
         };
         let len = ids.len();
@@ -815,7 +951,12 @@ impl Controller {
         let Some(g) = self.groups.group(group) else {
             return;
         };
-        let ids: Vec<TabId> = g.tabs.iter().map(|t| t.id).filter(|id| *id != keep).collect();
+        let ids: Vec<TabId> = g
+            .tabs
+            .iter()
+            .map(|t| t.id)
+            .filter(|id| *id != keep)
+            .collect();
         for id in ids {
             self.ungroup(group, id);
         }
@@ -869,9 +1010,141 @@ impl Controller {
         if open {
             // Only one dropdown is open at a time.
             self.tab_menu_open = false;
+            self.saved_menu_open = false;
             self.tab_menu = None;
             self.refresh_picker();
         }
+    }
+
+    /// Open or close the Saved-tab-sets panel. Only one dropdown is open at a
+    /// time. Opening refreshes the window list so the per-set availability is
+    /// current.
+    fn set_saved_menu(&mut self, open: bool) {
+        self.saved_menu_open = open;
+        if open {
+            self.tab_menu_open = false;
+            self.picker_open = false;
+            self.tab_menu = None;
+            self.windows = enumerate_windows();
+        }
+    }
+
+    /// How many of a set's saved tabs currently match a running, eligible window
+    /// that isn't already hosted.
+    fn set_available(&self, set: &config::SavedSet) -> usize {
+        let mut used: HashSet<isize> = self.styling.keys().copied().collect();
+        let mut count = 0;
+        for tab in &set.tabs {
+            if let Some(hwnd) = self
+                .windows
+                .iter()
+                .find(|w| {
+                    !used.contains(&w.hwnd)
+                        && !is_blacklisted(&w.class)
+                        && !w.elevated
+                        && w.exe_path.eq_ignore_ascii_case(&tab.exe_path)
+                })
+                .map(|w| w.hwnd)
+            {
+                used.insert(hwnd);
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// Snapshot the active group's tabs as a named set and persist it. An
+    /// existing set with the same name is replaced so the list stays tidy.
+    fn commit_save_set(&mut self, name: String) {
+        self.saved_prompt = None;
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let Some(group) = self.active_group.and_then(|id| self.groups.group(id)) else {
+            return;
+        };
+        let tabs: Vec<config::SavedTab> = group
+            .tabs
+            .iter()
+            .map(|t| config::SavedTab {
+                exe_path: t.window.exe_path.clone(),
+                exe_name: t.window.exe_name.clone(),
+                title_hint: t.window.title.clone(),
+            })
+            .collect();
+        if tabs.is_empty() {
+            return;
+        }
+        if let Some(existing) = self.saved_sets.iter_mut().find(|s| s.name == name) {
+            existing.tabs = tabs;
+        } else {
+            self.saved_sets.push(config::SavedSet { name, tabs });
+        }
+        self.persist_sets();
+    }
+
+    /// Rename the set at `index` and persist.
+    fn commit_rename_set(&mut self, index: usize, name: String) {
+        self.saved_prompt = None;
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(set) = self.saved_sets.get_mut(index) {
+            set.name = name;
+            self.persist_sets();
+        }
+    }
+
+    /// Delete the set at `index` and persist.
+    fn delete_set(&mut self, index: usize) {
+        if index < self.saved_sets.len() {
+            self.saved_sets.remove(index);
+            self.persist_sets();
+        }
+    }
+
+    /// Add every running window that matches a saved tab back as a tab. Matching
+    /// is by executable path (case-insensitive), preferring a title match;
+    /// windows already hosted are skipped, and nothing is ever launched.
+    fn restore_set(&mut self, index: usize) {
+        let Some(set) = self.saved_sets.get(index).cloned() else {
+            return;
+        };
+        self.windows = enumerate_windows();
+        let mut used: HashSet<isize> = self.styling.keys().copied().collect();
+        let mut chosen: Vec<isize> = Vec::new();
+        for tab in &set.tabs {
+            let pick = self
+                .windows
+                .iter()
+                .filter(|w| {
+                    !used.contains(&w.hwnd)
+                        && !is_blacklisted(&w.class)
+                        && !w.elevated
+                        && w.exe_path.eq_ignore_ascii_case(&tab.exe_path)
+                })
+                .min_by_key(|w| u8::from(w.title != tab.title_hint))
+                .map(|w| w.hwnd);
+            if let Some(hwnd) = pick {
+                used.insert(hwnd);
+                chosen.push(hwnd);
+            }
+        }
+        for hwnd in chosen {
+            self.add_window(hwnd);
+        }
+        self.saved_menu_open = false;
+    }
+
+    /// Persist the current saved-set list.
+    fn persist_sets(&self) {
+        let sets = config::SavedSets {
+            schema_version: config::SCHEMA_VERSION,
+            sets: self.saved_sets.clone(),
+        };
+        config::save_sets(&sets);
     }
 
     /// Rebuild the picker rows: eligible windows first, each flagged with a
@@ -881,7 +1154,9 @@ impl Controller {
         let eligible: Vec<isize> = self
             .windows
             .iter()
-            .filter(|w| !is_blacklisted(&w.class) && !w.elevated && !hosted.contains(&w.hwnd))
+            .filter(|w| {
+                !is_blacklisted(&w.class) && !w.elevated && !hosted.contains(&w.hwnd)
+            })
             .map(|w| w.hwnd)
             .collect();
         for hwnd in eligible {
@@ -937,19 +1212,16 @@ impl Controller {
         self.overlay
             || self.tab_menu_open
             || self.picker_open
+            || self.saved_menu_open
             || self.tab_menu.is_some()
             || self.renaming.is_some()
+            || self.saved_prompt.is_some()
     }
 
     /// The pointer rested on a tab: open the card under it, on ely's
     /// `HoverCard` rhythm (500 ms to open, 200 ms to close). While the card is
     /// already up, moving to another tab switches it with no delay.
-    fn preview_hover(
-        &mut self,
-        tab: TabId,
-        anchor: (f32, f32, f32, f32),
-        cx: &mut Context<Self>,
-    ) {
+    fn preview_hover(&mut self, tab: TabId, anchor: (f32, f32, f32, f32), cx: &mut Context<Self>) {
         if !self.settings.tabs.hover_preview {
             return;
         }
@@ -1062,11 +1334,7 @@ impl Controller {
         } else {
             self.snapshots.get(&hwnd).cloned()
         };
-        self.hover_preview = Some(HoverPreview {
-            tab,
-            anchor,
-            image,
-        });
+        self.hover_preview = Some(HoverPreview { tab, anchor, image });
     }
 
     /// Drop the card; the member comes back on the next `sync_worker`.

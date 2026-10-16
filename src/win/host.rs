@@ -323,7 +323,16 @@ struct WorkerState {
     rect: Option<(i32, i32, i32, i32)>,
     /// Last measured member frame insets, republished for `retrack`.
     inset: (i32, i32, i32, i32),
+    /// Passes left in the post-change settle window: after a member is placed
+    /// (first show, tab switch, host move), re-pin synchronously for a handful
+    /// of worker passes. Apps that re-assert an invisible DWM frame right after
+    /// being moved would otherwise leave a hairline gap under the title bar
+    /// until an unrelated resize happened to re-pin them.
+    settle: u8,
 }
+
+/// How many worker passes (≈50 ms each) to keep re-pinning after a placement.
+const SETTLE_PASSES: u8 = 12;
 
 /// One reposition pass: pin the active member to the content rect, keep the
 /// rest hidden, and raise the active member above the host when it changes.
@@ -383,8 +392,17 @@ fn apply(s: &Snapshot, last: &mut WorkerState) {
                     let (ox, oy, fw, fh) = inset;
                     let desired = (rect.0 - ox, rect.1 - oy, rect.2 + fw, rect.3 + fh);
                     if last.rect != Some(desired) || switched || re_shown {
-                        place_member(active, rect, inset, true, true);
                         last.rect = Some(desired);
+                        // Open a short settle window: re-pin on the next few
+                        // passes so a frame re-assert (or a lost async move)
+                        // can't leave the member a pixel off under the title bar.
+                        last.settle = SETTLE_PASSES;
+                    }
+                    if last.settle > 0 {
+                        last.settle -= 1;
+                        // Synchronous so the placement sticks; the one-shot
+                        // `update` from the UI thread used to post it async.
+                        place_member(active, rect, inset, true, false);
                     }
                 }
                 // Keep the member above the host when the host is focused.
@@ -562,7 +580,10 @@ pub fn content_rect_screen(host: isize, titlebar_logical: f32) -> Option<(i32, i
         if !ClientToScreen(hh, &mut origin).as_bool() {
             return None;
         }
-        let title_px = ((titlebar_logical * scale_factor(host)) as i32).max(0);
+        // Round to a whole device pixel so the member's top edge lands on the
+        // same pixel row the host actually drew the title bar to; truncating a
+        // fractional scale (e.g. 38 * 1.25 = 47.5) leaves a 1px seam.
+        let title_px = (titlebar_logical * scale_factor(host)).round().max(0.0) as i32;
         let width = (cr.right - cr.left).max(1);
         let height = ((cr.bottom - cr.top) - title_px).max(1);
         Some((origin.x, origin.y + title_px, width, height))

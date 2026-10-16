@@ -84,13 +84,27 @@ impl WinEventPump {
                 hooks.push(hook);
             }
             // Move/resize begin and end drive the Ctrl-drag "add window" gesture.
-            let move_start =
-                SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZESTART, None, Some(hook_proc), 0, 0, flags);
+            let move_start = SetWinEventHook(
+                EVENT_SYSTEM_MOVESIZESTART,
+                EVENT_SYSTEM_MOVESIZESTART,
+                None,
+                Some(hook_proc),
+                0,
+                0,
+                flags,
+            );
             if !move_start.0.is_null() {
                 hooks.push(move_start);
             }
-            let move_end =
-                SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, None, Some(hook_proc), 0, 0, flags);
+            let move_end = SetWinEventHook(
+                EVENT_SYSTEM_MOVESIZEEND,
+                EVENT_SYSTEM_MOVESIZEEND,
+                None,
+                Some(hook_proc),
+                0,
+                0,
+                flags,
+            );
             if !move_end.0.is_null() {
                 hooks.push(move_end);
             }
