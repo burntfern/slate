@@ -3,6 +3,10 @@ name = "slate"
 version = "0.1.0"
 edition = "2021"
 description = "Universal Window Tabs for Windows"
+license = "GPL-3.0-only"
+repository = "https://github.com/burntfern/slate"
+authors = ["burntfern"]
+readme = "README.md"
 
 [dependencies]
 ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components" }

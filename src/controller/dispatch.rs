@@ -105,6 +105,9 @@ impl Controller {
                 self.settings.tabs.show_bar = !self.settings.tabs.show_bar;
                 self.save_settings();
             }
+            Cmd::OpenRepository => {
+                crate::win::shell::open_url("https://github.com/burntfern/slate");
+            }
         }
         self.sync_worker();
         cx.notify();

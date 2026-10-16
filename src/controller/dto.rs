@@ -112,6 +112,7 @@ pub enum Cmd {
     PreviewCardHover(bool),
     Shutdown,
     ToggleTabBar,
+    OpenRepository,
 }
 
 #[derive(Clone)]

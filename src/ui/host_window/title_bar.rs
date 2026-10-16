@@ -96,6 +96,15 @@ pub(super) fn build(
             window.remove_window();
         }
     };
+    let open_repo = {
+        let ctrl = controller.clone();
+        move |_w: &mut Window, cx: &mut App| {
+            ctrl.update(cx, |c, cx| {
+                c.dispatch(Cmd::OpenRepository, cx);
+                c.dispatch(Cmd::SetOverlay(false), cx);
+            });
+        }
+    };
     let shortcuts_menu = Menu::new()
         .item(MenuItem::new("Next tab").keys("ctrl-tab"))
         .item(MenuItem::new("Previous tab").keys("ctrl-shift-tab"))
@@ -125,6 +134,11 @@ pub(super) fn build(
         .separator()
         .item(MenuItem::check("Hide tab bar", !info.show_tab_bar).on_click(toggle_tab_bar))
         .separator()
+        .item(
+            MenuItem::new("Open GitHub repository")
+                .icon(IconName::ExternalLink)
+                .on_click(open_repo),
+        )
         .item(MenuItem::new("Quit Slate").on_click(quit));
     let menu = OverflowMenu::new("host-menu", app_menu)
         .icon(if info.overlay {

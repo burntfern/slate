@@ -9,6 +9,7 @@ pub mod icon;
 pub mod integrity;
 pub mod janitor;
 pub mod pick;
+pub mod shell;
 pub mod shortcut;
 pub mod stack;
 pub mod tray;
