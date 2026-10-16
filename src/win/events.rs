@@ -7,8 +7,9 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_FOREGROUND, OBJID_WINDOW,
-    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_FOREGROUND,
+    EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
+    WINEVENT_SKIPOWNPROCESS,
 };
 
 /// A lifecycle change Slate cares about. hwnd is an isize so core never
@@ -18,6 +19,10 @@ pub enum WinEvent {
     Destroyed(isize),
     TitleChanged(isize),
     ForegroundChanged(isize),
+    /// The user started dragging/resizing a top-level window (its title bar).
+    MoveStarted(isize),
+    /// The drag/resize ended.
+    MoveEnded(isize),
 }
 
 thread_local! {
@@ -44,6 +49,8 @@ unsafe extern "system" fn hook_proc(
         EVENT_OBJECT_DESTROY => WinEvent::Destroyed(hwnd.0 as isize),
         EVENT_OBJECT_NAMECHANGE => WinEvent::TitleChanged(hwnd.0 as isize),
         EVENT_SYSTEM_FOREGROUND => WinEvent::ForegroundChanged(hwnd.0 as isize),
+        EVENT_SYSTEM_MOVESIZESTART => WinEvent::MoveStarted(hwnd.0 as isize),
+        EVENT_SYSTEM_MOVESIZEEND => WinEvent::MoveEnded(hwnd.0 as isize),
         _ => return,
     };
     QUEUE.with(|q| q.borrow_mut().push(e));
@@ -75,6 +82,17 @@ impl WinEventPump {
                     return None;
                 }
                 hooks.push(hook);
+            }
+            // Move/resize begin and end drive the Ctrl-drag "add window" gesture.
+            let move_start =
+                SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZESTART, None, Some(hook_proc), 0, 0, flags);
+            if !move_start.0.is_null() {
+                hooks.push(move_start);
+            }
+            let move_end =
+                SetWinEventHook(EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZEEND, None, Some(hook_proc), 0, 0, flags);
+            if !move_end.0.is_null() {
+                hooks.push(move_end);
             }
             let fg = SetWinEventHook(
                 EVENT_SYSTEM_FOREGROUND,

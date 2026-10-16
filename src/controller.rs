@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use ely_gpui_component::feedback::{Toast, Toaster};
 use ely_gpui_component::primitives::Severity;
+use ely_gpui_component::theme::{ActiveTheme, Mode, Theme};
 use gpui::{AppContext, Context, Entity, RenderImage};
 
 /// How long the pointer must rest on a tab before the hover card opens, and how
@@ -16,12 +17,14 @@ use gpui::{AppContext, Context, Entity, RenderImage};
 const PREVIEW_OPEN_MS: u64 = 500;
 const PREVIEW_LINGER_MS: u64 = 200;
 
+use crate::config;
 use crate::core::{Effect, GroupId, GroupSet, TabId, WindowIdentity};
 use crate::win::{
-    activate_window, capture_window, close_window, enumerate_windows, install_window_icon,
-    is_blacklisted, register_member, unregister_member, window_icon, window_rect, window_title,
-    window_under_cursor, Highlight, HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey,
-    StylingState, WinEvent, WinEventPump, WindowSnapshot,
+    activate_window, capture_window, close_window, content_rect_screen, ctrl_held, enumerate_windows,
+    install_window_icon, is_blacklisted, register_member, set_owned, unregister_member, window_icon,
+    window_rect, window_title, window_under_cursor, Highlight, HostWorker, IconPixels, Janitor,
+    KeyboardCapture, PickKey, Shortcut, ShortcutCapture, StylingState, WinEvent, WinEventPump,
+    WindowSnapshot,
 };
 
 /// UI → controller intent. The UI never calls Win32 directly.
@@ -93,6 +96,8 @@ pub enum Cmd {
     ToggleTabBadge,
     /// Show/hide the hover preview card.
     ToggleHoverPreview,
+    /// Flip the app's light/dark theme and persist the choice.
+    ToggleTheme,
     /// Hover a tab: after a rest, open the hover preview card under it.
     /// `anchor` is the tab's rectangle in logical client pixels.
     PreviewTab {
@@ -104,26 +109,6 @@ pub enum Cmd {
     /// The pointer entered (`true`) or left (`false`) the card itself.
     PreviewCardHover(bool),
     Shutdown,
-}
-
-/// Hosting options the user can toggle from the menu.
-#[derive(Debug, Clone, Copy)]
-pub struct HostSettings {
-    pub icons_in_tabs: bool,
-    /// Show the tab-count badge on the overflow chevron.
-    pub show_tab_badge: bool,
-    /// Show the hover preview card when resting on a tab.
-    pub hover_preview: bool,
-}
-
-impl Default for HostSettings {
-    fn default() -> Self {
-        Self {
-            icons_in_tabs: true,
-            show_tab_badge: true,
-            hover_preview: true,
-        }
-    }
 }
 
 /// A user-facing transient message. Slate keeps exactly one of these — the
@@ -239,7 +224,7 @@ pub struct Controller {
     capture: Option<KeyboardCapture>,
     /// Ring drawn over the window the pointer is on while picking.
     highlight: Option<Highlight>,
-    settings: HostSettings,
+    settings: config::Settings,
     icons: HashMap<isize, Option<Arc<RenderImage>>>,
     overlay: bool,
     /// True while the tab-overflow dropdown is open; like `overlay`, it hides the
@@ -268,11 +253,20 @@ pub struct Controller {
     /// Last captured frame per window, so a tab that isn't current (its window
     /// is hidden, nothing to sample) still shows something.
     snapshots: HashMap<isize, Arc<RenderImage>>,
+    /// Persistent global-shortcut hook (Ctrl+Tab family); drained in `tick`.
+    shortcuts: Option<ShortcutCapture>,
+    /// The foreign window currently being dragged, watched for the Ctrl-drag
+    /// "add as tab" gesture (drop it over the host while Ctrl is held).
+    drag: Option<isize>,
+    /// True while the current drag is a valid drop onto the host (Ctrl held and
+    /// the window overlaps the content rect); drives the drop ring.
+    drag_active: bool,
     _pump: Option<WinEventPump>,
 }
 
 impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        config::ensure();
         let toaster = cx.new(|_| Toaster::default());
         let controller = Self {
             windows: enumerate_windows(),
@@ -288,7 +282,7 @@ impl Controller {
             pick_gen: 0,
             capture: None,
             highlight: None,
-            settings: HostSettings::default(),
+            settings: config::load(),
             icons: HashMap::new(),
             overlay: false,
             tab_menu_open: false,
@@ -302,10 +296,14 @@ impl Controller {
             card_hovered: false,
             preview_gen: 0,
             snapshots: HashMap::new(),
+            shortcuts: ShortcutCapture::install(),
+            drag: None,
+            drag_active: false,
             _pump: WinEventPump::install(),
             toaster,
         };
         Self::start_event_pump(cx);
+        controller.apply_theme(cx);
         controller
     }
 
@@ -330,7 +328,17 @@ impl Controller {
 
     /// One drain of the WinEvent queue; re-renders only when something changed.
     fn tick(&mut self, cx: &mut Context<Self>) {
-        if self.drain_events() {
+        let mut changed = self.drain_events();
+        let shortcuts = self
+            .shortcuts
+            .as_ref()
+            .map(|capture| capture.drain())
+            .unwrap_or_default();
+        for shortcut in shortcuts {
+            changed |= self.apply_shortcut(shortcut);
+        }
+        self.pump_drag();
+        if changed {
             self.sync_worker();
             cx.notify();
         }
@@ -361,9 +369,9 @@ impl Controller {
                 })
                 .unwrap_or_default(),
             active: group.and_then(|g| g.active),
-            icons_in_tabs: self.settings.icons_in_tabs,
-            show_tab_badge: self.settings.show_tab_badge,
-            hover_preview_enabled: self.settings.hover_preview,
+            icons_in_tabs: self.settings.tabs.icons,
+            show_tab_badge: self.settings.tabs.count_badge,
+            hover_preview_enabled: self.settings.tabs.hover_preview,
             overlay: self.overlay,
             tab_menu_open: self.tab_menu_open,
             picker_open: self.picker_open,
@@ -437,8 +445,9 @@ impl Controller {
                 let open = !self.picker_open;
                 self.set_picker_open(open);
             }
-            Cmd::ToggleTabBadge => self.settings.show_tab_badge = !self.settings.show_tab_badge,
+            Cmd::ToggleTabBadge => self.toggle_tab_badge(),
             Cmd::ToggleHoverPreview => self.toggle_hover_preview(),
+            Cmd::ToggleTheme => self.toggle_theme(cx),
             Cmd::PreviewTab { tab, anchor } => self.preview_hover(tab, anchor, cx),
             Cmd::PreviewHide { tab } => self.preview_unhover(tab, cx),
             Cmd::PreviewCardHover(hovered) => self.preview_card_hover(hovered, cx),
@@ -473,6 +482,11 @@ impl Controller {
         self.tab_menu = None;
         self.renaming = None;
         self.rename_overrides.clear();
+        self.drag = None;
+        self.drag_active = false;
+        if let Some(highlight) = self.highlight.as_ref() {
+            highlight.hide();
+        }
         self.worker.stop();
     }
 
@@ -546,6 +560,72 @@ impl Controller {
         }
     }
 
+    /// A dragged window we could host: not our host, not already a member, and
+    /// eligible by the same filter the picker uses.
+    fn trackable_drag(&self, hwnd: isize) -> bool {
+        if Some(hwnd) == self.host_hwnd || self.styling.contains_key(&hwnd) {
+            return false;
+        }
+        self.windows
+            .iter()
+            .find(|w| w.hwnd == hwnd)
+            .is_some_and(|w| !is_blacklisted(&w.class) && !w.elevated)
+    }
+
+    /// True while the drag is a real drop onto the host: Ctrl held and the
+    /// dragged window overlaps the host's content area.
+    fn drag_target_ok(&self, hwnd: isize) -> bool {
+        if !ctrl_held() {
+            return false;
+        }
+        let Some(host) = self.host_hwnd else {
+            return false;
+        };
+        let Some((hx, hy, hw, hh)) = content_rect_screen(host, self.titlebar) else {
+            return false;
+        };
+        let Some((wx, wy, ww, wh)) = window_rect(hwnd) else {
+            return false;
+        };
+        wx < hx + hw && wx + ww > hx && wy < hy + hh && wy + wh > hy
+    }
+
+    /// Track the current drag (called each `tick`): keep the drop ring in step
+    /// with Ctrl and the window's position, and forget a window that vanished.
+    fn pump_drag(&mut self) {
+        let Some(hwnd) = self.drag else {
+            return;
+        };
+        if window_rect(hwnd).is_none() {
+            self.drag = None;
+            self.drag_active = false;
+            self.update_drag_highlight();
+            return;
+        }
+        let active = self.drag_target_ok(hwnd);
+        if active != self.drag_active {
+            self.drag_active = active;
+            self.update_drag_highlight();
+        }
+    }
+
+    /// Ring the host's content area while a Ctrl-drag drop is valid; otherwise
+    /// take the ring down.
+    fn update_drag_highlight(&mut self) {
+        if self.drag_active {
+            if self.highlight.is_none() {
+                self.highlight = Highlight::new();
+            }
+            if let (Some(highlight), Some(host)) = (self.highlight.as_ref(), self.host_hwnd) {
+                if let Some((x, y, w, h)) = content_rect_screen(host, self.titlebar) {
+                    highlight.show(x, y, w, h);
+                }
+            }
+        } else if let Some(highlight) = self.highlight.as_ref() {
+            highlight.hide();
+        }
+    }
+
     /// Add the window the pick settled on, if any, then leave pick mode.
     fn commit_pick(&mut self) {
         let target = self.hovered.take();
@@ -597,7 +677,7 @@ impl Controller {
         } else {
             return;
         }
-        if self.settings.icons_in_tabs {
+        if self.settings.tabs.icons {
             self.ensure_icon(hwnd);
         }
         self.groups.add_window(group, identity);
@@ -612,6 +692,51 @@ impl Controller {
         self.groups.set_active(group, tab);
         if let Some(hwnd) = self.hwnd_of_tab(group, tab) {
             self.activate_member(hwnd);
+        }
+    }
+
+    /// Apply a global shortcut to the active group. Returns true when it changed
+    /// anything (so the caller re-renders / re-syncs the worker).
+    fn apply_shortcut(&mut self, shortcut: Shortcut) -> bool {
+        let Some(group) = self.active_group else {
+            return false;
+        };
+        let Some((active, ids)) = self
+            .groups
+            .group(group)
+            .map(|g| (g.active, g.tabs.iter().map(|t| t.id).collect::<Vec<TabId>>()))
+        else {
+            return false;
+        };
+        let len = ids.len();
+        if len == 0 {
+            return false;
+        }
+        let current = active
+            .and_then(|id| ids.iter().position(|t| *t == id))
+            .unwrap_or(0);
+        match shortcut {
+            Shortcut::NextTab => {
+                self.select_tab(group, ids[(current + 1) % len]);
+                true
+            }
+            Shortcut::PrevTab => {
+                self.select_tab(group, ids[(current + len - 1) % len]);
+                true
+            }
+            Shortcut::CloseTab => {
+                self.ungroup(group, ids[current]);
+                true
+            }
+            Shortcut::SelectIndex(n) => {
+                let ix = n as usize - 1;
+                if ix < len {
+                    self.select_tab(group, ids[ix]);
+                    true
+                } else {
+                    false
+                }
+            }
         }
     }
 
@@ -665,7 +790,7 @@ impl Controller {
         }
     }
 
-    /// Close every tab positioned to the right of `tab`.
+    /// Ungroup every tab positioned to the right of `tab`.
     fn close_tabs_to_right(&mut self, group: GroupId, tab: TabId) {
         let Some(g) = self.groups.group(group) else {
             return;
@@ -679,7 +804,7 @@ impl Controller {
         }
     }
 
-    /// Close every tab positioned to the left of `tab`.
+    /// Ungroup every tab positioned to the left of `tab`.
     fn close_tabs_to_left(&mut self, group: GroupId, tab: TabId) {
         let Some(g) = self.groups.group(group) else {
             return;
@@ -794,7 +919,7 @@ impl Controller {
         anchor: (f32, f32, f32, f32),
         cx: &mut Context<Self>,
     ) {
-        if !self.settings.hover_preview {
+        if !self.settings.tabs.hover_preview {
             return;
         }
         self.hover_tab = Some(tab);
@@ -854,13 +979,14 @@ impl Controller {
     /// Show/hide the hover preview card. Hiding it also drops any card on
     /// screen and forgets the hover state.
     fn toggle_hover_preview(&mut self) {
-        self.settings.hover_preview = !self.settings.hover_preview;
-        if !self.settings.hover_preview {
+        self.settings.tabs.hover_preview = !self.settings.tabs.hover_preview;
+        if !self.settings.tabs.hover_preview {
             self.hover_tab = None;
             self.card_hovered = false;
             self.preview_gen = self.preview_gen.wrapping_add(1);
             self.hide_hover_preview();
         }
+        self.save_settings();
     }
 
     /// Run `f` after `ms`, unless a later hover change bumps the generation
@@ -938,12 +1064,54 @@ impl Controller {
 
     /// Show/hide the real window icon in each tab, extracting on first enable.
     fn toggle_icons_in_tabs(&mut self) {
-        self.settings.icons_in_tabs = !self.settings.icons_in_tabs;
-        if self.settings.icons_in_tabs {
+        self.settings.tabs.icons = !self.settings.tabs.icons;
+        if self.settings.tabs.icons {
             for hwnd in self.styling.keys().copied().collect::<Vec<_>>() {
                 self.ensure_icon(hwnd);
             }
         }
+        self.save_settings();
+    }
+
+    /// Show/hide the tab-count badge on the overflow chevron.
+    fn toggle_tab_badge(&mut self) {
+        self.settings.tabs.count_badge = !self.settings.tabs.count_badge;
+        self.save_settings();
+    }
+
+    /// Persist the current settings (best-effort; a write failure is silent).
+    fn save_settings(&self) {
+        config::save(&self.settings);
+    }
+
+    /// Apply the saved theme. `"system"` (or anything unknown) follows the OS.
+    fn apply_theme(&self, cx: &mut Context<Self>) {
+        let system = Mode::from(cx.window_appearance());
+        Theme::set_mode_now(self.resolve_mode(system), cx);
+    }
+
+    /// The stored theme choice resolved to a concrete mode.
+    fn resolve_mode(&self, system: Mode) -> Mode {
+        match self.settings.theme.as_str() {
+            "dark" => Mode::Dark,
+            "light" => Mode::Light,
+            _ => system,
+        }
+    }
+
+    /// Flip light/dark, apply it, and persist the new explicit choice (a toggle
+    /// leaves `"system"` behind — the user has now stated a preference).
+    fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+        let next = match cx.theme().mode() {
+            Mode::Dark => Mode::Light,
+            Mode::Light => Mode::Dark,
+        };
+        self.settings.theme = match next {
+            Mode::Dark => "dark".to_string(),
+            Mode::Light => "light".to_string(),
+        };
+        Theme::set_mode_now(next, cx);
+        self.save_settings();
     }
 
     /// Extract and cache a window's icon the first time it is needed.
@@ -964,7 +1132,12 @@ impl Controller {
             // the system. Only hosted members matter; skip the rest before any
             // title/identity lookups.
             match event {
-                WinEvent::Destroyed(hwnd) if self.styling.contains_key(&hwnd) => {
+                // A member we still track, or a closed tab whose member was
+                // already released (`close_tab` drops it from `styling` before
+                // posting `WM_CLOSE`), both still need their tab dropped here.
+                WinEvent::Destroyed(hwnd)
+                    if self.styling.contains_key(&hwnd) || self.groups.contains_window(hwnd) =>
+                {
                     self.window_gone(hwnd);
                     changed = true;
                 }
@@ -975,6 +1148,29 @@ impl Controller {
                     // A renamed tab keeps its override; the live title is ignored.
                     let title = window_title(hwnd);
                     if self.groups.update_title(hwnd, &title) == Effect::Applied {
+                        changed = true;
+                    }
+                }
+                // Ctrl-drag "add window": begin watching a foreign window's move.
+                WinEvent::MoveStarted(hwnd) => {
+                    if Some(hwnd) != self.host_hwnd && !self.styling.contains_key(&hwnd) {
+                        // Refresh so a window opened since the last enumeration
+                        // is still recognised (and hostable at drop time).
+                        self.windows = enumerate_windows();
+                        if self.trackable_drag(hwnd) {
+                            self.drag = Some(hwnd);
+                            self.drag_active = false;
+                        }
+                    }
+                }
+                // The drag ended: if it was a valid Ctrl-drop on the host, host it.
+                WinEvent::MoveEnded(hwnd) if self.drag == Some(hwnd) => {
+                    self.drag = None;
+                    let drop = self.drag_active;
+                    self.drag_active = false;
+                    self.update_drag_highlight();
+                    if drop {
+                        self.add_window(hwnd);
                         changed = true;
                     }
                 }
@@ -1025,6 +1221,12 @@ impl Controller {
         let members: Vec<(isize, StylingState)> =
             self.styling.iter().map(|(k, v)| (*k, v.clone())).collect();
         self.janitor.persist(host, &members);
+        // Tell the shortcut hook which windows count as "Slate is focused".
+        set_owned(
+            std::iter::once(host)
+                .chain(self.styling.keys().copied())
+                .filter(|hwnd| *hwnd != 0),
+        );
     }
 
     fn active_hwnd(&self, group: GroupId) -> Option<isize> {

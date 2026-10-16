@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "theme": "system",
+  "accent": "blue",
+  "tabs": {
+    "icons": true,
+    "count_badge": true,
+    "hover_preview": true
+  }
+}

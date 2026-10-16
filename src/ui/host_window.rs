@@ -14,7 +14,7 @@ use ely_gpui_component::{
     overlays::PromptDialog,
     primitives::{Icon, IconName, Image},
     shell::{drag_region, WindowControls},
-    theme::{ActiveTheme, ControlSize, Elevation, IconSize, Mode, Radius, TextSize, Theme},
+    theme::{ActiveTheme, ControlSize, Elevation, IconSize, Mode, Radius, TextSize},
     typography::{Caption, Ellipsis},
 };
 use gpui::{
@@ -440,6 +440,14 @@ impl Render for HostWindow {
                 window.remove_window();
             }
         };
+        let shortcuts_menu = Menu::new()
+            .item(MenuItem::new("Next tab").keys("ctrl-tab"))
+            .item(MenuItem::new("Previous tab").keys("ctrl-shift-tab"))
+            .item(MenuItem::new("Jump to tab 1–9").keys("ctrl-1"))
+            .item(MenuItem::new("Close tab").keys("ctrl-w"))
+            .separator()
+            .item(MenuItem::new("Pick a window").keys("tab"))
+            .item(MenuItem::new("Close menu").keys("esc"));
         let app_menu = Menu::new()
             .item(
                 MenuItem::new("Pick a window…")
@@ -448,6 +456,9 @@ impl Render for HostWindow {
                     .on_click(begin_pick),
             )
             .item(MenuItem::new("Refresh window list").on_click(refresh))
+            .item(
+                MenuItem::submenu("Keyboard shortcuts", shortcuts_menu).icon(IconName::Keyboard),
+            )
             .separator()
             .item(
                 MenuItem::check("Show window icons in tabs", info.icons_in_tabs)
@@ -1048,7 +1059,7 @@ impl Render for HostWindow {
                 ),
                 item(
                     "ctx-left",
-                    "Close to the left",
+                    "Ungroup to the left",
                     None,
                     IconName::ChevronLeft,
                     false,
@@ -1057,7 +1068,7 @@ impl Render for HostWindow {
                 ),
                 item(
                     "ctx-right",
-                    "Close to the right",
+                    "Ungroup to the right",
                     None,
                     IconName::ChevronRight,
                     false,
@@ -1104,7 +1115,9 @@ impl Render for HostWindow {
         let mode = cx.theme().mode();
         // The theme toggle always sits at the right of the title bar, just
         // before the drag gutter and the window controls.
+        let theme_ctrl = controller.clone();
         let make_theme = move || {
+            let ctrl = theme_ctrl.clone();
             div().flex_none().occlude().child(
                 IconButton::new(
                     "host-theme",
@@ -1117,12 +1130,8 @@ impl Render for HostWindow {
                     Mode::Dark => "Light theme",
                     Mode::Light => "Dark theme",
                 })
-                .on_click(|_event, _window, cx| {
-                    let next = match cx.theme().mode() {
-                        Mode::Dark => Mode::Light,
-                        Mode::Light => Mode::Dark,
-                    };
-                    Theme::set_mode_now(next, cx);
+                .on_click(move |_event, _window, cx| {
+                    ctrl.update(cx, |c, cx| c.dispatch(Cmd::ToggleTheme, cx));
                 }),
             )
         };
