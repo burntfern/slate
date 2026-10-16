@@ -57,8 +57,11 @@ impl Janitor {
             spawn(&path);
             self.started = true;
         }
-        write(&path, &bytes);
-        self.last = Some(bytes);
+        // Only remember the bytes once they are actually on disk, or a later
+        // identical membership would be skipped and leave a stale file behind.
+        if write(&path, &bytes) {
+            self.last = Some(bytes);
+        }
     }
 }
 
@@ -139,7 +142,10 @@ fn process_alive(pid: u32) -> bool {
                 let _ = CloseHandle(handle);
                 alive
             }
-            Err(_) => false,
+            // If the process cannot be opened we cannot confirm it is dead, so
+            // assume it is alive and leave its windows alone (a live Slate must
+            // never have its members stolen by the sweep).
+            Err(_) => true,
         }
     }
 }
@@ -166,14 +172,15 @@ pub fn encode(slate_hwnd: isize, members: &[(isize, StylingState)]) -> Vec<u8> {
     b
 }
 
-/// Write the encoded state, replacing any previous file atomically.
-pub fn write(path: &Path, bytes: &[u8]) {
+/// Write the encoded state, replacing any previous file atomically. Returns
+/// whether the rename onto the destination succeeded.
+pub fn write(path: &Path, bytes: &[u8]) -> bool {
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, bytes).is_err() {
-        return;
+        return false;
     }
     // `std::fs::rename` replaces the destination on Windows (MoveFileEx).
-    let _ = std::fs::rename(&tmp, path);
+    std::fs::rename(&tmp, path).is_ok()
 }
 
 /// Watchdog entry point: block until `pid` exits, then restore and clean up.
@@ -235,6 +242,12 @@ fn decode(bytes: &[u8]) -> Option<(isize, Vec<(isize, StylingState)>)> {
     }
     let slate_hwnd = i64::from_le_bytes(bytes[4..12].try_into().ok()?) as isize;
     let count = u32::from_le_bytes(bytes[12..16].try_into().ok()?) as usize;
+    // Reject a bogus count before allocating: each member occupies a fixed
+    // number of bytes, so the remaining file length caps how many can be present.
+    const PER_MEMBER: usize = 8 + 8 + 8 + 16 + PLACEMENT_LEN;
+    if count > bytes.len().saturating_sub(16) / PER_MEMBER {
+        return None;
+    }
     let mut off = 16;
     let mut members = Vec::with_capacity(count);
     for _ in 0..count {
@@ -320,5 +333,14 @@ mod tests {
     #[test]
     fn bad_magic_rejected() {
         assert!(decode(&[0u8; 16]).is_none());
+    }
+
+    #[test]
+    fn absurd_count_is_rejected_without_allocating() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC.to_le_bytes());
+        bytes.extend_from_slice(&0i64.to_le_bytes());
+        bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode(&bytes).is_none());
     }
 }

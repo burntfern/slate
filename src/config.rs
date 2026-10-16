@@ -16,6 +16,7 @@
 //! the app falls back to defaults instead of crashing.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -77,6 +78,7 @@ impl Default for Settings {
 /// across runs).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedSet {
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub tabs: Vec<SavedTab>,
@@ -283,20 +285,30 @@ pub fn load_sets() -> SavedSets {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return SavedSets::default();
     };
-    let value: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(value) => value,
-        Err(_) => {
-            backup(&path);
-            return SavedSets::default();
-        }
-    };
-    match serde_json::from_value(migrate(value)) {
-        Ok(sets) => sets,
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(value) => parse_sets(value),
         Err(_) => {
             backup(&path);
             SavedSets::default()
         }
     }
+}
+
+/// Parse `sets.json`, keeping every well-formed set and skipping bad entries so a
+/// single malformed set never drops the others.
+fn parse_sets(value: serde_json::Value) -> SavedSets {
+    let value = migrate(value);
+    let mut out = SavedSets::default();
+    if let Some(version) = value.get("schema_version").and_then(|v| v.as_u64()) {
+        out.schema_version = version as u32;
+    }
+    if let Some(items) = value.get("sets").and_then(|v| v.as_array()) {
+        out.sets = items
+            .iter()
+            .filter_map(|item| serde_json::from_value::<SavedSet>(item.clone()).ok())
+            .collect();
+    }
+    out
 }
 
 /// Persist the saved tab sets atomically, creating the directory if needed.
@@ -354,6 +366,11 @@ fn apply(settings: &mut Settings, partial: PartialSettings) {
 
 /// Bring an older on-disk shape forward. Pure: no IO, unit-tested.
 pub fn migrate(mut value: serde_json::Value) -> serde_json::Value {
+    // Valid JSON that is not an object (a bare number/string/array/null) has no
+    // keys to migrate; the caller's deserialize step rejects it and falls back.
+    if !value.is_object() {
+        return value;
+    }
     let version = value
         .get("schema_version")
         .and_then(|v| v.as_u64())
@@ -365,14 +382,36 @@ pub fn migrate(mut value: serde_json::Value) -> serde_json::Value {
     value
 }
 
-/// Write `bytes` to `path` via a temp file + rename so a failure never clobbers
-/// the last good file.
+/// A unique sibling temp path, so concurrent saves never clobber a shared `.tmp`.
+fn temp_path_for(path: &Path) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()))
+}
+
+/// Write `bytes` to `path` via a flushed temp file + rename so a crash never
+/// leaves a truncated file in place of the last good one.
 fn atomic_write(path: &Path, bytes: &[u8]) -> bool {
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, bytes).is_err() {
+    let tmp = temp_path_for(path);
+    let flushed = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if flushed.is_err() {
+        let _ = std::fs::remove_file(&tmp);
         return false;
     }
-    std::fs::rename(&tmp, path).is_ok()
+    if std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    true
 }
 
 /// Move a corrupt file into `backups\` with a timestamp, so it is preserved but
@@ -447,6 +486,29 @@ mod tests {
     fn migrate_stamps_missing_version() {
         let out = migrate(serde_json::json!({ "theme": "dark" }));
         assert_eq!(out["schema_version"], SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_leaves_non_object_untouched() {
+        // Valid JSON of the wrong shape must not panic during migration.
+        assert_eq!(migrate(serde_json::json!(123)).as_u64(), Some(123));
+        assert!(migrate(serde_json::json!(null)).is_null());
+    }
+
+    #[test]
+    fn parse_sets_skips_bad_entries() {
+        let value = serde_json::json!({
+            "schema_version": 1,
+            "sets": [
+                { "name": "Good", "tabs": [] },
+                { "tabs": "not-an-array" },
+                42,
+                { "name": "AlsoGood", "tabs": [] }
+            ]
+        });
+        let sets = parse_sets(value);
+        let names: Vec<_> = sets.sets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Good", "AlsoGood"]);
     }
 
     #[test]
