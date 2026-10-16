@@ -1,4 +1,5 @@
 pub mod activate;
+pub mod capture;
 pub mod compat;
 pub mod enumerate;
 pub mod events;
@@ -11,6 +12,7 @@ pub mod pick;
 pub mod stack;
 
 pub use activate::{activate_window, close_window, window_rect};
+pub use capture::{capture_window, WindowSnapshot};
 pub use compat::is_blacklisted;
 pub use enumerate::{enumerate_windows, window_title};
 pub use events::{WinEvent, WinEventPump};

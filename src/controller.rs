@@ -7,17 +7,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-
 use ely_gpui_component::feedback::{Toast, Toaster};
 use ely_gpui_component::primitives::Severity;
 use gpui::{AppContext, Context, Entity, RenderImage};
 
+/// How long the pointer must rest on a tab before the hover card opens, and how
+/// long it may stray before the card closes. Matches ely's `HoverCard`.
+const PREVIEW_OPEN_MS: u64 = 500;
+const PREVIEW_LINGER_MS: u64 = 200;
+
 use crate::core::{Effect, GroupId, GroupSet, TabId, WindowIdentity};
 use crate::win::{
-    activate_window, close_window, enumerate_windows, install_window_icon, is_blacklisted,
-    register_member, unregister_member, window_icon, window_rect, window_title,
+    activate_window, capture_window, close_window, enumerate_windows, install_window_icon,
+    is_blacklisted, register_member, unregister_member, window_icon, window_rect, window_title,
     window_under_cursor, Highlight, HostWorker, IconPixels, Janitor, KeyboardCapture, PickKey,
-    StylingState, WinEvent, WinEventPump,
+    StylingState, WinEvent, WinEventPump, WindowSnapshot,
 };
 
 /// UI → controller intent. The UI never calls Win32 directly.
@@ -87,6 +91,18 @@ pub enum Cmd {
     TogglePicker,
     /// Show/hide the tab-count badge on the overflow chevron.
     ToggleTabBadge,
+    /// Show/hide the hover preview card.
+    ToggleHoverPreview,
+    /// Hover a tab: after a rest, open the hover preview card under it.
+    /// `anchor` is the tab's rectangle in logical client pixels.
+    PreviewTab {
+        tab: TabId,
+        anchor: (f32, f32, f32, f32),
+    },
+    /// Pointer left `tab`: linger, then hide the card.
+    PreviewHide { tab: TabId },
+    /// The pointer entered (`true`) or left (`false`) the card itself.
+    PreviewCardHover(bool),
     Shutdown,
 }
 
@@ -96,6 +112,8 @@ pub struct HostSettings {
     pub icons_in_tabs: bool,
     /// Show the tab-count badge on the overflow chevron.
     pub show_tab_badge: bool,
+    /// Show the hover preview card when resting on a tab.
+    pub hover_preview: bool,
 }
 
 impl Default for HostSettings {
@@ -103,6 +121,7 @@ impl Default for HostSettings {
         Self {
             icons_in_tabs: true,
             show_tab_badge: true,
+            hover_preview: true,
         }
     }
 }
@@ -156,6 +175,8 @@ pub struct HostInfo {
     pub icons_in_tabs: bool,
     /// Show the tab-count badge on the overflow chevron.
     pub show_tab_badge: bool,
+    /// Show the hover preview card when resting on a tab.
+    pub hover_preview_enabled: bool,
     /// True while a UI overlay (menu) is open and the member is hidden.
     pub overlay: bool,
     /// True while the tab-overflow dropdown is open and the member is hidden.
@@ -170,6 +191,8 @@ pub struct HostInfo {
     pub renaming: Option<TabId>,
     /// True while pick mode is armed (the bar shows a spinner).
     pub picking: bool,
+    /// The hover preview card to draw over the (now hidden) content area.
+    pub hover_preview: Option<HoverPreview>,
 }
 
 /// The tab right-click menu: which tab, and where it was requested.
@@ -188,6 +211,16 @@ pub struct PickerRow {
     pub icon: Option<Arc<RenderImage>>,
     /// `Some` when the window can't be hosted; the string is the reason.
     pub reason: Option<String>,
+}
+
+/// The hover preview card: which tab it mirrors, where it hangs (`anchor`, the
+/// tab's rectangle in logical client pixels) and the frame to show. `image` is
+/// `None` when the window has never been on screen for us to sample.
+#[derive(Clone)]
+pub struct HoverPreview {
+    pub tab: TabId,
+    pub anchor: (f32, f32, f32, f32),
+    pub image: Option<Arc<RenderImage>>,
 }
 
 pub struct Controller {
@@ -223,6 +256,18 @@ pub struct Controller {
     /// Display-title overrides for renamed tabs, keyed by hwnd. Takes precedence
     /// over the live window title and survives retitle events.
     rename_overrides: HashMap<isize, String>,
+    /// The hover preview card, while shown. Rendering it hides the member (same
+    /// as a menu), so the card is a snapshot captured before the member hid.
+    hover_preview: Option<HoverPreview>,
+    /// The tab the pointer is over right now, whether or not the card is up.
+    hover_tab: Option<TabId>,
+    /// True while the pointer is over the card itself, which keeps it open.
+    card_hovered: bool,
+    /// Bumped on every hover change to cancel stale open/linger timers.
+    preview_gen: u64,
+    /// Last captured frame per window, so a tab that isn't current (its window
+    /// is hidden, nothing to sample) still shows something.
+    snapshots: HashMap<isize, Arc<RenderImage>>,
     _pump: Option<WinEventPump>,
 }
 
@@ -252,6 +297,11 @@ impl Controller {
             tab_menu: None,
             renaming: None,
             rename_overrides: HashMap::new(),
+            hover_preview: None,
+            hover_tab: None,
+            card_hovered: false,
+            preview_gen: 0,
+            snapshots: HashMap::new(),
             _pump: WinEventPump::install(),
             toaster,
         };
@@ -313,6 +363,7 @@ impl Controller {
             active: group.and_then(|g| g.active),
             icons_in_tabs: self.settings.icons_in_tabs,
             show_tab_badge: self.settings.show_tab_badge,
+            hover_preview_enabled: self.settings.hover_preview,
             overlay: self.overlay,
             tab_menu_open: self.tab_menu_open,
             picker_open: self.picker_open,
@@ -320,6 +371,7 @@ impl Controller {
             tab_menu: self.tab_menu.clone(),
             renaming: self.renaming.map(|(_, tab)| tab),
             picking: self.picking,
+            hover_preview: self.hover_preview.clone(),
         }
     }
 
@@ -386,6 +438,10 @@ impl Controller {
                 self.set_picker_open(open);
             }
             Cmd::ToggleTabBadge => self.settings.show_tab_badge = !self.settings.show_tab_badge,
+            Cmd::ToggleHoverPreview => self.toggle_hover_preview(),
+            Cmd::PreviewTab { tab, anchor } => self.preview_hover(tab, anchor, cx),
+            Cmd::PreviewHide { tab } => self.preview_unhover(tab, cx),
+            Cmd::PreviewCardHover(hovered) => self.preview_card_hover(hovered, cx),
             Cmd::Shutdown => self.shutdown(),
         }
         self.sync_worker();
@@ -396,6 +452,7 @@ impl Controller {
     /// call more than once; never leaves a member hidden (spec 02/06).
     fn shutdown(&mut self) {
         self.end_pick();
+        self.hide_hover_preview();
         // Remember the member that was on screen so it can be re-focused once it
         // is restored: a restored window is missing from the taskbar and unfocused
         // until re-activated, which reads as "the window didn't come back".
@@ -710,11 +767,168 @@ impl Controller {
         self.picker_rows = rows;
     }
 
+    /// True while any UI surface hides the hosted member: the menu, the
+    /// dropdowns, the picker, the rename prompt, or the hover card. An owned
+    /// member paints above the host, so these are the states that blank the
+    /// content rect.
+    fn overlaying(&self) -> bool {
+        self.menu_overlay() || self.hover_preview.is_some()
+    }
+
+    /// The menu-ish overlays only — everything that hides the member for a
+    /// reason other than the hover card itself.
+    fn menu_overlay(&self) -> bool {
+        self.overlay
+            || self.tab_menu_open
+            || self.picker_open
+            || self.tab_menu.is_some()
+            || self.renaming.is_some()
+    }
+
+    /// The pointer rested on a tab: open the card under it, on ely's
+    /// `HoverCard` rhythm (500 ms to open, 200 ms to close). While the card is
+    /// already up, moving to another tab switches it with no delay.
+    fn preview_hover(
+        &mut self,
+        tab: TabId,
+        anchor: (f32, f32, f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings.hover_preview {
+            return;
+        }
+        self.hover_tab = Some(tab);
+        self.preview_gen = self.preview_gen.wrapping_add(1);
+        if self.hover_preview.is_some() {
+            self.show_hover_preview(tab, anchor);
+            return;
+        }
+        self.after_hover_delay(PREVIEW_OPEN_MS, cx, move |c, cx| {
+            c.show_hover_preview(tab, anchor);
+            c.sync_worker();
+            cx.notify();
+        });
+    }
+
+    /// Pointer left `tab`: linger so the card can be crossed, then drop it. A
+    /// stale leave (the pointer is already on another tab) is ignored, so
+    /// switching tabs never blanks the card.
+    fn preview_unhover(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        if self.hover_tab != Some(tab) {
+            return;
+        }
+        self.hover_tab = None;
+        self.preview_gen = self.preview_gen.wrapping_add(1);
+        if self.hover_preview.is_none() {
+            return;
+        }
+        self.after_hover_delay(PREVIEW_LINGER_MS, cx, |c, cx| {
+            // The pointer may have crossed into the card, which keeps it open.
+            if !c.card_hovered {
+                c.hide_hover_preview();
+                c.sync_worker();
+                cx.notify();
+            }
+        });
+    }
+
+    /// The pointer entered (`true`) or left (`false`) the card. Entering
+    /// cancels a pending hide so crossing the gap from the tab into the card
+    /// keeps it up; leaving starts the linger, unless the pointer is back on a
+    /// tab (whose own hover takes over).
+    fn preview_card_hover(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        self.card_hovered = hovered;
+        self.preview_gen = self.preview_gen.wrapping_add(1);
+        if hovered || self.hover_preview.is_none() || self.hover_tab.is_some() {
+            return;
+        }
+        self.after_hover_delay(PREVIEW_LINGER_MS, cx, |c, cx| {
+            if !c.card_hovered && c.hover_tab.is_none() {
+                c.hide_hover_preview();
+                c.sync_worker();
+                cx.notify();
+            }
+        });
+    }
+
+    /// Show/hide the hover preview card. Hiding it also drops any card on
+    /// screen and forgets the hover state.
+    fn toggle_hover_preview(&mut self) {
+        self.settings.hover_preview = !self.settings.hover_preview;
+        if !self.settings.hover_preview {
+            self.hover_tab = None;
+            self.card_hovered = false;
+            self.preview_gen = self.preview_gen.wrapping_add(1);
+            self.hide_hover_preview();
+        }
+    }
+
+    /// Run `f` after `ms`, unless a later hover change bumps the generation
+    /// first — which cancels this pending open or linger.
+    fn after_hover_delay(
+        &mut self,
+        ms: u64,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
+    ) {
+        let gen = self.preview_gen;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(ms))
+                .await;
+            let _ = this.update(cx, |c, cx| {
+                if c.preview_gen == gen {
+                    f(c, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Show the card. The frame is sampled here — before opening, which hides
+    /// the member — and only for the active window, since the inactive ones are
+    /// already hidden; those fall back to the last frame we caught.
+    fn show_hover_preview(&mut self, tab: TabId, anchor: (f32, f32, f32, f32)) {
+        let (Some(_host), Some(group)) = (self.host_hwnd, self.active_group) else {
+            return;
+        };
+        let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
+            return;
+        };
+        let active = self.active_hwnd(group);
+        let image = if Some(hwnd) == active && !self.overlaying() {
+            let captured = capture_window(hwnd).and_then(render_snapshot);
+            if let Some(frame) = captured.as_ref() {
+                self.snapshots.insert(hwnd, frame.clone());
+            }
+            captured.or_else(|| self.snapshots.get(&hwnd).cloned())
+        } else {
+            self.snapshots.get(&hwnd).cloned()
+        };
+        self.hover_preview = Some(HoverPreview {
+            tab,
+            anchor,
+            image,
+        });
+    }
+
+    /// Drop the card; the member comes back on the next `sync_worker`.
+    fn hide_hover_preview(&mut self) {
+        self.hover_preview = None;
+        self.card_hovered = false;
+    }
+
     /// A destroyed foreign window is no longer hostable: drop its tab.
     fn window_gone(&mut self, hwnd: isize) {
         self.styling.remove(&hwnd);
         self.icons.remove(&hwnd);
+        self.snapshots.remove(&hwnd);
         self.rename_overrides.remove(&hwnd);
+        if let Some(tab) = self.hover_preview.as_ref().map(|p| p.tab) {
+            if self.active_group.and_then(|g| self.hwnd_of_tab(g, tab)) == Some(hwnd) {
+                self.hide_hover_preview();
+            }
+        }
         self.windows.retain(|w| w.hwnd != hwnd);
         self.groups.window_destroyed(hwnd);
         if self.picker_open {
@@ -778,14 +992,22 @@ impl Controller {
     /// Publish the host layout (active member + hidden siblings) to the worker.
     fn sync_worker(&mut self) {
         let host = self.host_hwnd.unwrap_or(0);
-        // While a UI overlay (menu) or the tab-overflow dropdown is open, hide
-        // the active member too: an owned window always paints above the host,
-        // so it would cover them otherwise.
-        let overlaying = self.overlay
-            || self.tab_menu_open
-            || self.picker_open
-            || self.tab_menu.is_some()
-            || self.renaming.is_some();
+        // A menu, dropdown, or picker opening over the card wins: drop the card.
+        // (Only the menu-ish surfaces — not the card itself.)
+        if self.menu_overlay() {
+            self.hide_hover_preview();
+        } else if let Some(tab) = self.hover_preview.as_ref().map(|p| p.tab) {
+            let hosted = self
+                .active_group
+                .and_then(|g| self.hwnd_of_tab(g, tab))
+                .is_some_and(|h| self.styling.contains_key(&h));
+            if !hosted {
+                self.hide_hover_preview();
+            }
+        }
+        // While any overlay (menu, dropdown, or card) is up, hide the active
+        // member too: an owned window always paints above the host.
+        let overlaying = self.overlaying();
         let active = if overlaying {
             None
         } else {
@@ -833,5 +1055,11 @@ impl Controller {
 /// Decode raw RGBA pixels into a gpui image, once per window.
 fn render_image(px: IconPixels) -> Option<Arc<RenderImage>> {
     let buffer = image::RgbaImage::from_raw(px.width, px.height, px.rgba)?;
+    Some(crate::ui::render_image(buffer))
+}
+
+/// Wrap a captured window frame as a gpui image.
+fn render_snapshot(snap: WindowSnapshot) -> Option<Arc<RenderImage>> {
+    let buffer = image::RgbaImage::from_raw(snap.width, snap.height, snap.rgba)?;
     Some(crate::ui::render_image(buffer))
 }

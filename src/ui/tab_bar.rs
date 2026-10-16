@@ -13,9 +13,9 @@ use ely_gpui_component::{
     typography::Ellipsis,
 };
 use gpui::{
-    div, prelude::*, Animation, AnimationExt, App, ElementId, EntityId, FontWeight,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderImage,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
+    canvas, div, prelude::*, Animation, AnimationExt, App, Bounds, ElementId, EntityId,
+    FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
+    RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 
 /// What to draw at the start of a tab.
@@ -53,6 +53,9 @@ struct TabDrag {
 type OnTab = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 type OnReorder = Rc<dyn Fn(usize, usize, &mut Window, &mut App)>;
 type OnContext = Rc<dyn Fn(&SharedString, Point<Pixels>, &mut Window, &mut App)>;
+/// Reports a tab hover changing, with the tab's bounds in window space (so a
+/// caller can anchor something below it, e.g. a hover preview).
+type OnTabHover = Rc<dyn Fn(&SharedString, bool, Bounds<Pixels>, &mut Window, &mut App)>;
 
 /// Browser-style tabs across the top of the host window.
 #[derive(IntoElement)]
@@ -64,6 +67,7 @@ pub struct SlateTabBar {
     on_close: Option<OnTab>,
     on_reorder: Option<OnReorder>,
     on_context: Option<OnContext>,
+    on_tab_hover: Option<OnTabHover>,
 }
 
 impl SlateTabBar {
@@ -76,6 +80,7 @@ impl SlateTabBar {
             on_close: None,
             on_reorder: None,
             on_context: None,
+            on_tab_hover: None,
         }
     }
 
@@ -123,6 +128,15 @@ impl SlateTabBar {
         self.on_context = Some(Rc::new(handler));
         self
     }
+
+    /// Reports a tab's hover changing, with its window-space bounds.
+    pub fn on_tab_hover(
+        mut self,
+        handler: impl Fn(&SharedString, bool, Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_tab_hover = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for SlateTabBar {
@@ -139,6 +153,12 @@ impl RenderOnce for SlateTabBar {
         let enter = motion::duration(motion::BASE, cx);
         let nudge = motion::NUDGE;
         let tabs = self.tabs.into_iter().enumerate().map(|(ix, tab)| {
+            let hover_cb = self.on_tab_hover.clone();
+            // Measures this tab's bounds each frame so a hover report can anchor
+            // below it (a plain `on_hover` carries no geometry). Created before
+            // `cx.theme()` so the borrow of `cx` doesn't overlap.
+            let hover_bounds =
+                window.use_keyed_state(("slate-tab-hover", ix), cx, |_, _| Bounds::default());
             let theme = cx.theme();
             let colors = &theme.colors;
             let selected = self.selected.as_ref() == Some(&tab.id);
@@ -192,6 +212,17 @@ impl RenderOnce for SlateTabBar {
                 })
                 .cursor_pointer()
                 .occlude()
+                .on_hover({
+                    let state = hover_bounds.clone();
+                    let hover_cb = hover_cb.clone();
+                    let id = tab.id.clone();
+                    move |hovered, window, cx| {
+                        if let Some(hover_cb) = hover_cb.as_ref() {
+                            let bounds = *state.read(cx);
+                            hover_cb(&id, *hovered, bounds, window, cx);
+                        }
+                    }
+                })
                 .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
                 .on_mouse_down(MouseButton::Middle, {
                     let close = close.clone();
@@ -250,6 +281,25 @@ impl RenderOnce for SlateTabBar {
                         .min_w_0()
                         .child(Ellipsis::new(tab.title.clone())),
                 )
+                .child({
+                    // Tracks the tab's bounds (window space) for the hover
+                    // report; absolute, so it doesn't affect the layout.
+                    let measure = hover_bounds.clone();
+                    canvas(
+                        move |bounds, window, cx| {
+                            let changed =
+                                measure.update(cx, |b, _| std::mem::replace(b, bounds) != bounds);
+                            if changed {
+                                window.request_animation_frame();
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                })
                 .when_some(close, |el, close| {
                     el.child(
                         div()

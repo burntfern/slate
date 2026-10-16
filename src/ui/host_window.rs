@@ -23,7 +23,7 @@ use gpui::{
     Pixels, Point, Render, RenderImage, SharedString, Size, Styled, Subscription, Window,
 };
 
-use crate::controller::{Cmd, Controller, TabInfo};
+use crate::controller::{Cmd, Controller, HoverPreview, TabInfo};
 use crate::core::TabId;
 use crate::ui::tab_bar::{SlateTab, SlateTabBar, TabIcon};
 
@@ -154,6 +154,98 @@ fn empty_state(cx: &App, icon: Option<Arc<RenderImage>>, caption: &str, hint: &s
         )
 }
 
+/// The tab hover preview: a taskbar-style card under the tab, holding a
+/// snapshot of the window on top and its icon + title in a footer. Placed as an
+/// absolute child of the content root (window space), like the dropdowns, and
+/// clamped inside the window edges. The wrapper starts at the tab's bottom edge
+/// and pads the visual gap transparently, so the pointer never leaves the hover
+/// area on its way from the tab into the card.
+fn hover_card(
+    cx: &App,
+    preview: &HoverPreview,
+    tab: Option<&TabInfo>,
+    viewport: Size<Pixels>,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
+) -> gpui::AnyElement {
+    const CARD_W: f32 = 224.0;
+    const IMAGE_H: f32 = 126.0;
+    const MARGIN: f32 = 8.0;
+    const GAP: f32 = 6.0;
+    let theme = cx.theme();
+    let colors = &theme.colors;
+    let rad_lg = theme.radius(Radius::Lg);
+    let (x, y, _w, h) = preview.anchor;
+    let left = x.min(viewport.width.as_f32() - CARD_W - MARGIN).max(MARGIN);
+
+    let image = match preview.image.clone() {
+        Some(img) => Image::new(("host-hover-shot", 0usize), img)
+            .w_full()
+            .h(px(IMAGE_H))
+            .into_any_element(),
+        // No frame caught yet (a window that has never been on screen): fall
+        // back to the app icon centered in the image area.
+        None => div()
+            .w_full()
+            .h(px(IMAGE_H))
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(colors.sunken)
+            .when_some(tab.and_then(|t| t.icon.clone()), |area, icon| {
+                area.child(Image::new(("host-hover-icon", 0usize), icon).w(px(48.0)).h(px(48.0)))
+            })
+            .into_any_element(),
+    };
+
+    let title = tab
+        .map(|t| t.title.clone())
+        .unwrap_or_else(|| "Window".to_string());
+    let footer = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .border_t_1()
+        .border_color(colors.border)
+        .when_some(tab.and_then(|t| t.icon.clone()), |row, icon| {
+            row.child(Image::new(("host-hover-tab-icon", 0usize), icon).w(px(16.0)).h(px(16.0)))
+        })
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .text_size(theme.text_size(TextSize::Sm))
+                .text_color(colors.fg)
+                .child(Ellipsis::new(title)),
+        );
+
+    let card = div()
+        .w(px(CARD_W))
+        .rounded(rad_lg)
+        .bg(colors.overlay)
+        .border_1()
+        .border_color(colors.border)
+        .overflow_hidden()
+        .child(image)
+        .child(footer);
+
+    div()
+        .id(("host-hover", preview.tab.0 as usize))
+        .absolute()
+        .left(px(left))
+        .top(px(y + h))
+        .pt(px(GAP))
+        .on_hover(on_hover)
+        .with_animation(
+            ("host-hover-anim", preview.tab.0 as usize),
+            enter_animation(cx),
+            |el, t| el.opacity(t),
+        )
+        .child(card)
+        .into_any_element()
+}
+
 impl Render for HostWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let controller = self.controller.clone();
@@ -267,6 +359,31 @@ impl Render for HostWindow {
                 }
             }
         });
+        // Hovering a tab shows the preview card (a snapshot the controller
+        // captured before it blanked the member); leaving hides it. Only the
+        // anchor (the tab's window-space rect) crosses this boundary.
+        tab_bar = tab_bar.on_tab_hover({
+            let ctrl = controller.clone();
+            move |id, hovered, bounds, _window, cx| {
+                let (Some(_g), Ok(n)) = (group, id.to_string().parse::<u64>()) else {
+                    return;
+                };
+                let tab = TabId(n);
+                if hovered {
+                    let anchor = (
+                        bounds.origin.x.as_f32(),
+                        bounds.origin.y.as_f32(),
+                        bounds.size.width.as_f32(),
+                        bounds.size.height.as_f32(),
+                    );
+                    ctrl.update(cx, |c, cx| {
+                        c.dispatch(Cmd::PreviewTab { tab, anchor }, cx);
+                    });
+                } else {
+                    ctrl.update(cx, |c, cx| c.dispatch(Cmd::PreviewHide { tab }, cx));
+                }
+            }
+        });
 
         let begin_pick = {
             let ctrl = controller.clone();
@@ -304,6 +421,15 @@ impl Render for HostWindow {
                 });
             }
         };
+        let toggle_hover_preview = {
+            let ctrl = controller.clone();
+            move |_w: &mut Window, cx: &mut App| {
+                ctrl.update(cx, |c, cx| {
+                    c.dispatch(Cmd::ToggleHoverPreview, cx);
+                    c.dispatch(Cmd::SetOverlay(false), cx);
+                });
+            }
+        };
         // Quit through the controller so every hosted window is unregistered and
         // restored before the process exits (a bare `process::exit` would leave
         // them frame-stripped until the janitor replays).
@@ -330,6 +456,10 @@ impl Render for HostWindow {
             .item(
                 MenuItem::check("Show tab count badge", info.show_tab_badge)
                     .on_click(toggle_badge),
+            )
+            .item(
+                MenuItem::check("Show hover preview", info.hover_preview_enabled)
+                    .on_click(toggle_hover_preview),
             )
             .separator()
             .item(MenuItem::new("Quit Slate").on_click(quit));
@@ -1134,7 +1264,8 @@ impl Render for HostWindow {
             || info.tab_menu_open
             || info.picker_open
             || info.tab_menu.is_some()
-            || info.renaming.is_some();
+            || info.renaming.is_some()
+            || info.hover_preview.is_some();
         let body = match (info.tabs.is_empty(), overlaying) {
             (true, _) => empty_state(
                 cx,
@@ -1244,6 +1375,19 @@ impl Render for HostWindow {
         // the member covers the content area and the toast is simply not seen.
         let toaster = self.controller.read(cx).toaster();
         let mut content = content.child(body);
+        // The hover card rides on the content root too, clamped inside the
+        // window edges. Hovering the card itself keeps it open.
+        if let Some(preview) = info.hover_preview.as_ref() {
+            let tab = info.tabs.iter().find(|t| t.id == preview.tab);
+            let on_hover = {
+                let ctrl = controller.clone();
+                move |hovered: &bool, _w: &mut Window, cx: &mut App| {
+                    let hovered = *hovered;
+                    ctrl.update(cx, |c, cx| c.dispatch(Cmd::PreviewCardHover(hovered), cx));
+                }
+            };
+            content = content.child(hover_card(cx, preview, tab, viewport, on_hover));
+        }
         // Dropdowns ride on the content root (not the title bar) so the drag
         // region's mask can't clip them; the member is hidden while any is open.
         if let Some(overlay) = picker_overlay {
