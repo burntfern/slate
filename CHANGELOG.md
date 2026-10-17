@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/burntfern/slate/compare/v0.1.0...v0.2.0) (2026-10-17)
+
+
+### Features
+
+* **update:** apply releases in place and clean up stale copies ([11ce343](https://github.com/burntfern/slate/commit/11ce343fd3b4f8cfddfbef0dac7e96b51d6891c6))
+
+
+### Bug Fixes
+
+* **update:** surface update-check results as toasts ([583ef23](https://github.com/burntfern/slate/commit/583ef237ba5b67b7a5f0ceec064dc9f0bff2950a))
+
 ## 0.1.0 (2026-10-17)
 
 
