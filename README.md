@@ -37,15 +37,16 @@ rest stay running and hidden.
 
 ## Install
 
-Download `slate-vX.Y.Z-x86_64-pc-windows-msvc.zip` from the
-[Releases](https://github.com/burntfern/slate/releases) page, unzip it, and run
-`slate.exe`. There is no installer and nothing else to install.
+Grab the `slate-vX.Y.Z-x86_64-pc-windows-msvc.exe` asset from the
+[latest release](https://github.com/burntfern/slate/releases/latest) and run it.
+Swap `X.Y.Z` for the version shown there. There is no installer and nothing else
+to install.
 
 Releases are unsigned, so SmartScreen may warn on the first launch. To check a
 download, compare it against the published `SHA256SUMS`:
 
 ```powershell
-Get-FileHash .\slate-vX.Y.Z-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+Get-FileHash .\slate-vX.Y.Z-x86_64-pc-windows-msvc.exe -Algorithm SHA256  # the file you downloaded
 ```
 
 ## Build from source

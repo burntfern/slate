@@ -12,6 +12,8 @@ pub struct Settings {
     pub accent: String,
     #[serde(default)]
     pub tabs: Tabs,
+    #[serde(default)]
+    pub updates: Updates,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +46,7 @@ impl Default for Settings {
             theme: theme_default(),
             accent: accent_default(),
             tabs: Tabs::default(),
+            updates: Updates::default(),
         }
     }
 }
@@ -56,6 +59,14 @@ pub struct SavedSet {
     pub name: String,
     #[serde(default)]
     pub tabs: Vec<SavedTab>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Updates {
+    #[serde(default)]
+    pub latest: Option<String>,
+    #[serde(default)]
+    pub checked_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

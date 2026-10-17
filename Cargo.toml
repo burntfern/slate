@@ -1,6 +1,6 @@
 [package]
 name = "slate"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
 description = "Universal Window Tabs for Windows"
 license = "GPL-3.0-only"

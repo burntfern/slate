@@ -7,6 +7,7 @@ mod picker;
 mod sets;
 mod settings;
 mod tabs;
+mod update;
 
 pub use dto::{
     Cmd, HostInfo, HoverPreview, PickerRow, SavedPrompt, SavedSetInfo, TabInfo, TabMenu,
@@ -21,7 +22,7 @@ use std::time::Duration;
 
 use self::dto::app_name;
 use crate::config;
-use crate::core::{GroupId, GroupSet, TabId, WindowIdentity};
+use crate::core::{GroupId, GroupSet, TabId, UpdateState, WindowIdentity};
 use crate::win::{
     activate_window, enumerate_windows, unregister_member, Highlight, HostWorker, Janitor,
     KeyboardCapture, ShortcutCapture, StylingState, WinEventPump,
@@ -68,6 +69,7 @@ pub struct Controller {
     tray: Option<crate::win::TrayIcon>,
     drag: Option<isize>,
     drag_active: bool,
+    update: UpdateState,
     info_cache: RefCell<Option<Arc<HostInfo>>>,
     index_cache: RefCell<Option<Index>>,
     _pump: Option<WinEventPump>,
@@ -84,6 +86,11 @@ impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
         config::ensure();
         let toaster = cx.new(|_| Toaster::default());
+        let settings = config::load();
+        let update = UpdateState::from_cached(
+            crate::core::update::CURRENT_VERSION,
+            settings.updates.latest.as_deref(),
+        );
         let controller = Self {
             windows: enumerate_windows(),
             groups: GroupSet::new(),
@@ -98,7 +105,7 @@ impl Controller {
             pick_gen: 0,
             capture: None,
             highlight: None,
-            settings: config::load(),
+            settings,
             icons: HashMap::new(),
             overlay: false,
             tab_menu_open: false,
@@ -121,6 +128,7 @@ impl Controller {
             tray: crate::win::TrayIcon::start(),
             drag: None,
             drag_active: false,
+            update,
             info_cache: RefCell::new(None),
             index_cache: RefCell::new(None),
             _pump: WinEventPump::install(),
@@ -226,6 +234,8 @@ impl Controller {
             picking: self.picking,
             hover_preview: self.hover_preview.clone(),
             show_tab_bar: self.settings.tabs.show_bar,
+            update: self.update.clone(),
+            version: crate::core::update::CURRENT_VERSION,
         }
     }
 

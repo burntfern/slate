@@ -4,7 +4,7 @@ use gpui::RenderImage;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::core::{GroupId, TabId};
+use crate::core::{GroupId, TabId, UpdateState};
 use crate::win::{IconPixels, WindowSnapshot};
 
 #[derive(Debug, Clone)]
@@ -113,6 +113,7 @@ pub enum Cmd {
     Shutdown,
     ToggleTabBar,
     OpenRepository,
+    CheckForUpdates,
 }
 
 #[derive(Clone)]
@@ -146,6 +147,8 @@ pub struct HostInfo {
     pub picking: bool,
     pub hover_preview: Option<HoverPreview>,
     pub show_tab_bar: bool,
+    pub update: UpdateState,
+    pub version: &'static str,
 }
 
 #[derive(Clone)]

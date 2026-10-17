@@ -14,6 +14,7 @@ use super::overlays::{enter_animation, overlay_layer};
 use super::panels;
 use super::HostCtx;
 use crate::controller::Cmd;
+use crate::core::update::UpdateState;
 use crate::ui::tab_bar::SlateTabBar;
 
 pub(super) struct TitleBar {
@@ -105,10 +106,45 @@ pub(super) fn build(
             });
         }
     };
+    let check_updates = {
+        let ctrl = controller.clone();
+        move |_w: &mut Window, cx: &mut App| {
+            ctrl.update(cx, |c, cx| {
+                c.dispatch(Cmd::CheckForUpdates, cx);
+                c.dispatch(Cmd::SetOverlay(false), cx);
+            });
+        }
+    };
+    let (update_label, update_icon, update_disabled, update_available) = match &info.update {
+        UpdateState::Checking => (
+            "Checking for updates…".to_string(),
+            IconName::RefreshCw,
+            true,
+            false,
+        ),
+        UpdateState::Available(version) => (
+            format!("Update available: v{version}"),
+            IconName::Download,
+            false,
+            true,
+        ),
+        UpdateState::UpToDate => (
+            "Slate is up to date".to_string(),
+            IconName::CircleCheck,
+            true,
+            false,
+        ),
+        UpdateState::Idle | UpdateState::Failed => (
+            "Check for updates".to_string(),
+            IconName::RefreshCw,
+            false,
+            false,
+        ),
+    };
     let shortcuts_menu = Menu::new()
         .item(MenuItem::new("Next tab").keys("ctrl-tab"))
         .item(MenuItem::new("Previous tab").keys("ctrl-shift-tab"))
-        .item(MenuItem::new("Jump to tab 1–9").keys("ctrl-1"))
+        .item(MenuItem::new("Jump to tab 1-9").keys("ctrl-1"))
         .item(MenuItem::new("Close tab").keys("ctrl-w"))
         .separator()
         .item(MenuItem::new("Pick a window").keys("tab"))
@@ -135,10 +171,18 @@ pub(super) fn build(
         .item(MenuItem::check("Hide tab bar", !info.show_tab_bar).on_click(toggle_tab_bar))
         .separator()
         .item(
+            MenuItem::new(update_label)
+                .icon(update_icon)
+                .disabled(update_disabled)
+                .on_click(check_updates),
+        )
+        .item(
             MenuItem::new("Open GitHub repository")
                 .icon(IconName::ExternalLink)
                 .on_click(open_repo),
         )
+        .separator()
+        .item(MenuItem::new(format!("Slate v{}", info.version)).disabled(true))
         .item(MenuItem::new("Quit Slate").on_click(quit));
     let menu = OverflowMenu::new("host-menu", app_menu)
         .icon(if info.overlay {
@@ -150,6 +194,7 @@ pub(super) fn build(
 
     let menu_wrap = {
         let ctrl = controller.clone();
+        let success = ctx.palette.success;
         div()
             .id("menu-overlay-wrap")
             .relative()
@@ -160,6 +205,17 @@ pub(super) fn build(
                 ctrl.update(cx, |c, cx| c.dispatch(Cmd::ToggleOverlay, cx));
             })
             .child(menu)
+            .when(update_available, |wrap| {
+                wrap.child(
+                    div()
+                        .absolute()
+                        .top(px(4.0))
+                        .right(px(4.0))
+                        .size(px(8.0))
+                        .rounded_full()
+                        .bg(success),
+                )
+            })
     };
 
     let (tab_overflow, chevron_overlay) = panels::tab_overflow(ctx);

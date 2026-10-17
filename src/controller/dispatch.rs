@@ -106,8 +106,9 @@ impl Controller {
                 self.save_settings();
             }
             Cmd::OpenRepository => {
-                crate::win::shell::open_url("https://github.com/burntfern/slate");
+                crate::win::shell::open_url(crate::core::update::REPOSITORY_URL);
             }
+            Cmd::CheckForUpdates => self.check_for_updates(cx),
         }
         self.sync_worker();
         cx.notify();

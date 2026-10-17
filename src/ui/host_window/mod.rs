@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ely_gpui_component::feedback::ToastViewport;
 use ely_gpui_component::forms::TextInput;
 use ely_gpui_component::theme::ActiveTheme;
+use ely_gpui_component::typography::{Caption, Kbd};
 use gpui::prelude::*;
 use gpui::{
     div, App, Context, Entity, IntoElement, MouseButton, ParentElement, Render, RenderImage,
@@ -20,7 +21,7 @@ mod overlays;
 mod panels;
 mod title_bar;
 
-use art::{empty_state, grayscale_mark};
+use art::{empty_state, grayscale_mark, key_cap};
 use hover_card::hover_card;
 
 fn hwnd_of(window: &Window) -> Option<isize> {
@@ -311,7 +312,7 @@ impl Render for HostWindow {
             .flex_col()
             .bg(bg)
             .on_mouse_down(MouseButton::Left, dismiss)
-            .on_key_down(escape)
+            .capture_key_down(escape)
             .on_drop::<TabDrag>(detach_out)
             .child(title.element);
 
@@ -324,26 +325,38 @@ impl Render for HostWindow {
             || info.saved_prompt.is_some()
             || info.hover_preview.is_some();
         let body = match (info.tabs.is_empty(), overlaying) {
-            (true, _) => empty_state(
-                cx,
-                self.empty_icon.clone(),
-                "No windows yet",
-                "Click + to add a window, or press Tab to pick one",
-            ),
+            (true, _) => {
+                let caption = Caption::new("No windows yet").into_any_element();
+                let hint = div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child("Click")
+                    .child(Kbd::new("+"))
+                    .child("to add a window, or")
+                    .child(key_cap("Drag", cx))
+                    .child("one in while holding")
+                    .child(key_cap("Ctrl", cx))
+                    .into_any_element();
+                empty_state(cx, self.empty_icon.clone(), caption, hint)
+            }
             (false, true) => {
                 let n = info.tabs.len();
-                let (caption, hint) = if n == 1 {
-                    (
-                        "1 window open".to_string(),
-                        "Your window is hidden while a menu is open".to_string(),
-                    )
+                let noun = if n == 1 {
+                    "window open"
                 } else {
-                    (
-                        format!("{n} windows open"),
-                        "Your windows are hidden while a menu is open".to_string(),
-                    )
+                    "windows open"
                 };
-                empty_state(cx, self.empty_icon.clone(), &caption, &hint)
+                let caption = Caption::new(format!("{n} {noun}")).into_any_element();
+                let hint = div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child("Press")
+                    .child(Kbd::new("escape"))
+                    .child("to bring them back")
+                    .into_any_element();
+                empty_state(cx, self.empty_icon.clone(), caption, hint)
             }
             (false, false) => div().flex_1(),
         };

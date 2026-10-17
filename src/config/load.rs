@@ -9,6 +9,7 @@ struct PartialSettings {
     theme: Option<String>,
     accent: Option<String>,
     tabs: Option<PartialTabs>,
+    updates: Option<PartialUpdates>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -17,6 +18,12 @@ struct PartialTabs {
     count_badge: Option<bool>,
     hover_preview: Option<bool>,
     show_bar: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialUpdates {
+    latest: Option<String>,
+    checked_at: Option<i64>,
 }
 
 fn home_dir() -> PathBuf {
@@ -215,6 +222,14 @@ fn apply(settings: &mut Settings, partial: PartialSettings) {
             settings.tabs.show_bar = show_bar;
         }
     }
+    if let Some(updates) = partial.updates {
+        if updates.latest.is_some() {
+            settings.updates.latest = updates.latest;
+        }
+        if let Some(checked_at) = updates.checked_at {
+            settings.updates.checked_at = checked_at;
+        }
+    }
 }
 
 fn migrate(mut value: serde_json::Value) -> serde_json::Value {
@@ -262,6 +277,7 @@ mod tests {
                     hover_preview: None,
                     show_bar: None,
                 }),
+                updates: None,
             },
         );
         assert_eq!(s.theme, "dark");

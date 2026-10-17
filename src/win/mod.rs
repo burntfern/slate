@@ -13,6 +13,7 @@ pub mod shell;
 pub mod shortcut;
 pub mod stack;
 pub mod tray;
+pub mod update;
 
 pub use activate::{activate_window, close_window, move_window, window_rect};
 pub use capture::{capture_window, WindowSnapshot};

@@ -5,7 +5,7 @@ use ely_gpui_component::primitives::{Icon, IconName, Image};
 use ely_gpui_component::theme::{
     ActiveTheme, ControlSize, Elevation, IconSize, Radius, TextSize, HUE_NAMES,
 };
-use ely_gpui_component::typography::Ellipsis;
+use ely_gpui_component::typography::{Ellipsis, Kbd};
 use gpui::prelude::*;
 use gpui::{
     canvas, div, px, AnyElement, Bounds, ClipboardItem, FontWeight, MouseButton, Point, Styled,
@@ -290,12 +290,7 @@ pub(super) fn picker(ctx: &mut HostCtx) -> (AnyElement, Option<AnyElement>) {
                         .color(colors.fg_subtle),
                 )
                 .child(div().flex_1().min_w_0().child("Pick a window with"))
-                .child(
-                    div()
-                        .text_size(text_xs)
-                        .text_color(colors.fg_subtle)
-                        .child("Tab"),
-                )
+                .child(Kbd::new("tab"))
                 .into_any_element(),
         );
 

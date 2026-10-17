@@ -16,7 +16,7 @@ cargo build -j 1
 
 Use `-j 1`. Parallel builds on Windows can transiently fail with
 `os error 1455` ("paging file is too small") or `E0786`. These are not code
-errors — retry the command. If a failure persists, read the output: it is
+errors. Retry the command. If a failure persists, read the output: it is
 usually a real compile error.
 
 ## Before opening a pull request
