@@ -69,6 +69,21 @@ pub struct Updates {
     pub checked_at: i64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstallRecord {
+    /// Full path of the exe that last ran; the anchor for single-instance
+    /// and stale-copy detection.
+    #[serde(default)]
+    pub path: String,
+    /// Version of that exe, so a newer copy launched from elsewhere can spot
+    /// it as an older leftover.
+    #[serde(default)]
+    pub version: String,
+    /// Pid of that run; only meaningful while the process lives.
+    #[serde(default)]
+    pub pid: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedTab {
     #[serde(default)]
@@ -134,6 +149,24 @@ mod tests {
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back.theme, s.theme);
         assert_eq!(back.tabs.icons, s.tabs.icons);
+    }
+
+    #[test]
+    fn install_record_round_trips() {
+        let record = InstallRecord {
+            path: "C:\\apps\\slate.exe".into(),
+            version: "0.1.1".into(),
+            pid: 4321,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let back: InstallRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, record);
+    }
+
+    #[test]
+    fn install_record_tolerates_missing_fields() {
+        let back: InstallRecord = serde_json::from_str("{}").unwrap();
+        assert_eq!(back, InstallRecord::default());
     }
 
     #[test]

@@ -62,7 +62,7 @@ fn temp_path_for(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = temp_path_for(path);
     let written = (|| -> io::Result<()> {
         let mut file = File::create(&tmp)?;

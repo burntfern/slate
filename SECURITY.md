@@ -27,6 +27,8 @@ Slate is a Win32 desktop app that hosts other windows. Areas of interest:
 - Window ownership and message handling (`src/win/`).
 - The single-instance janitor and its shared state (`src/win/janitor/`).
 - Config and saved-set parsing (`src/config/`).
+- The self-update flow and its registered-exe record (`src/win/update.rs`,
+  `slate\install.json`).
 - The tray icon, global shortcuts, and IPC.
 
 Out of scope: anything that needs an already-compromised machine, and the

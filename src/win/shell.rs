@@ -3,7 +3,9 @@ use std::sync::OnceLock;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::Win32::UI::WindowsAndMessaging::{
+    MessageBoxW, MB_ICONINFORMATION, MB_OK, SW_SHOWNORMAL,
+};
 
 // One long-lived worker opens URLs, so repeated clicks cannot spawn threads.
 fn sender() -> &'static Sender<String> {
@@ -32,4 +34,19 @@ fn sender() -> &'static Sender<String> {
 
 pub fn open_url(url: &str) {
     let _ = sender().send(url.to_owned());
+}
+
+/// Blocking, but only used when a second copy quits immediately at startup.
+pub fn info_message(title: &str, body: &str) {
+    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
+    let title = wide(title);
+    let body = wide(body);
+    unsafe {
+        let _ = MessageBoxW(
+            None,
+            PCWSTR(title.as_ptr()),
+            PCWSTR(body.as_ptr()),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
 }

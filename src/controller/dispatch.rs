@@ -19,6 +19,8 @@ impl Controller {
                 }
                 self.worker.start();
                 self.worker.install_move_tracker(hwnd);
+                // The window exists now, so a stale-copy prompt can show.
+                self.offer_stale_cleanup(cx);
             }
             Cmd::SelectTab { group, tab } => self.select_tab(group, tab),
             Cmd::Ungroup { group, tab } => {

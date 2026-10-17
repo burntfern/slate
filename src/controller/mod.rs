@@ -70,6 +70,8 @@ pub struct Controller {
     drag: Option<isize>,
     drag_active: bool,
     update: UpdateState,
+    updating: bool,
+    stale_copy: Option<(String, String)>,
     info_cache: RefCell<Option<Arc<HostInfo>>>,
     index_cache: RefCell<Option<Index>>,
     _pump: Option<WinEventPump>,
@@ -96,6 +98,9 @@ fn saved_detail(count: usize, available: usize) -> SharedString {
 impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
         config::ensure();
+        // One live copy per machine state; may quit right here if another
+        // copy already runs, and remembers an older leftover to offer later.
+        let stale_copy = update::startup_install();
         let toaster = cx.new(|_| Toaster::default());
         let settings = config::load();
         let update = UpdateState::from_cached(
@@ -140,6 +145,8 @@ impl Controller {
             drag: None,
             drag_active: false,
             update,
+            updating: false,
+            stale_copy,
             info_cache: RefCell::new(None),
             index_cache: RefCell::new(None),
             _pump: WinEventPump::install(),
