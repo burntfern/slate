@@ -1,4 +1,5 @@
 [toolchain]
-channel = "stable"
+# Pinned so CI and local builds agree; bump it deliberately, not silently.
+channel = "1.99.0"
 components = ["rustfmt", "clippy"]
-targets = ["x86_64-pc-windows-msvc"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]

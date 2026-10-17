@@ -1,16 +1,31 @@
 name: CI
 
 on:
+  # main is deliberately not a push target: a pull_request run builds the merge
+  # result, so merging would otherwise rerun CI for a commit the PR already
+  # verified. Close the direct-push gap with branch protection that requires
+  # the CI check. development keeps its push trigger so work without an open
+  # PR is still verified.
   push:
-    branches: [main, master, development]
+    branches: [development]
   pull_request:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
+  # The cargo cache is reused across commits, so incremental artifacts are pure
+  # overhead: they never match a fresh checkout and they bloat the archive.
+  CARGO_INCREMENTAL: "0"
+  # Debug info is most of the cached target directory. Line tables keep
+  # backtraces readable while cutting the archive from roughly 1 GB.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 concurrency:
+  # Cancel superseded runs on pull requests only. A push to main must always run
+  # to completion, otherwise back-to-back merges cancel the verification of the
+  # commit that actually shipped.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -18,15 +33,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Channel (stable), components and target are also pinned in
-      # rust-toolchain.toml; keep the two in step.
+      # The exact version is pinned here and in rust-toolchain.toml; keep the
+      # two in step rather than following stable silently.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Only the long-lived branches write the archive. Pull requests still
+          # restore it, but no longer each save their own copy and evict the
+          # others from the 10 GB budget.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development' }}
 
       - name: Format
         run: cargo fmt --all -- --check

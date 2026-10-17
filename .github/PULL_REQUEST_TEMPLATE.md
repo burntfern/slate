@@ -8,11 +8,13 @@
 
 ## Checklist
 
-- [ ] `cargo fmt --all` run
-- [ ] `cargo clippy -j 1 --all-targets -- -D warnings` is clean
-- [ ] `cargo build -j 1` succeeds
-- [ ] `cargo test -j 1` passes
+- [ ] `cargo fmt --all -- --check` is clean
+- [ ] `cargo clippy --locked --all-targets -- -D warnings` is clean
+- [ ] `cargo build --locked` succeeds
+- [ ] `cargo test --locked` passes
 - [ ] Ran the app and confirmed the change (UI / Win32 paths)
+
+<!-- If cargo fails with `os error 1455` (paging/commit limit), rerun with `-j 1`. -->
 
 ## Related
 

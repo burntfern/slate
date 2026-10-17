@@ -5,7 +5,7 @@ Rust MSVC toolchain.
 
 ## Prerequisites
 
-- Rust stable with the `x86_64-pc-windows-msvc` target.
+- The toolchain pinned in `rust-toolchain.toml` (rustup installs it automatically).
 - The Windows SDK (for `rc.exe`, used to embed the icon and version resource).
 
 ## Building
@@ -22,15 +22,16 @@ cargo build
 Run all of these and make sure they pass:
 
 ```powershell
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo build
-cargo test
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo build --locked
+cargo test --locked
 ```
 
-`cargo clippy --all-targets` must be warning-free. The test suite covers the
-pure modules (`core`, `config`); the UI and Win32 layers are verified by running
-the app.
+These mirror `.github/workflows/ci.yml` exactly, so a locally clean run should be
+a green PR. `cargo clippy --locked --all-targets` must be warning-free. The test
+suite covers the pure modules (`core`, `config`); the UI and Win32 layers are
+verified by running the app.
 
 ## Commit messages
 
