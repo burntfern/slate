@@ -2,7 +2,8 @@ pub const REPOSITORY_URL: &str = "https://github.com/burntfern/slate";
 pub const RELEASES_URL: &str = "https://github.com/burntfern/slate/releases/latest";
 pub const LATEST_API_URL: &str = "https://api.github.com/repos/burntfern/slate/releases/latest";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const CHECK_COOLDOWN_SECS: i64 = 30;
+// Throttle for repeated menu clicks; also keeps API calls rare.
+pub const CHECK_COOLDOWN_SECS: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum UpdateState {

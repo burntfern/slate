@@ -211,7 +211,8 @@ impl Controller {
                 SharedString::from(format!("Update available: v{version}"))
             }
             UpdateState::UpToDate => SharedString::from("Slate is up to date"),
-            UpdateState::Idle | UpdateState::Failed => SharedString::from("Check for updates"),
+            UpdateState::Idle => SharedString::from("Check for updates"),
+            UpdateState::Failed => SharedString::from("Update check failed - retry"),
         };
         HostInfo {
             group: group.map(|g| g.id),

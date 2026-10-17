@@ -194,8 +194,19 @@ pub struct HoverPreview {
 pub(super) fn pick_toast() -> Toast {
     Toast::new("Add a window")
         .severity(Severity::Info)
-        .body("Hover a window · press TAB to add · Esc to cancel")
+        .body("Hover a window - press TAB to add - Esc to cancel")
         .stay(Some(Duration::from_secs(4)))
+}
+
+pub(super) fn update_toast(
+    title: &'static str,
+    severity: Severity,
+    body: impl Into<SharedString>,
+) -> Toast {
+    Toast::new(title)
+        .severity(severity)
+        .body(body)
+        .stay(Some(Duration::from_secs(5)))
 }
 
 pub(super) fn app_name(exe_name: &str) -> String {

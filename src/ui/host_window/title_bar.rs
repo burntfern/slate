@@ -126,7 +126,8 @@ fn update_state(state: &UpdateState) -> (IconName, bool, bool) {
         UpdateState::Checking => (IconName::RefreshCw, true, false),
         UpdateState::Available(_) => (IconName::Download, false, true),
         UpdateState::UpToDate => (IconName::CircleCheck, true, false),
-        UpdateState::Idle | UpdateState::Failed => (IconName::RefreshCw, false, false),
+        UpdateState::Idle => (IconName::RefreshCw, false, false),
+        UpdateState::Failed => (IconName::TriangleAlert, false, false),
     }
 }
 
@@ -142,7 +143,7 @@ fn app_menu(controller: &Entity<Controller>, info: &HostInfo) -> Menu {
         .item(MenuItem::new("Close menu").keys("esc"));
     Menu::new()
         .item(
-            MenuItem::new("Pick a window…")
+            MenuItem::new("Pick a window...")
                 .icon(IconName::Plus)
                 .keys("Tab")
                 .on_click(overlay_action(controller, || Cmd::BeginPick)),
