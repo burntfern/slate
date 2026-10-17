@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: slate
+  TRIPLE: x86_64-pc-windows-msvc
+  # Shrink the shipped binary here only; local `cargo build --release` stays
+  # unstripped and fast.
+  CARGO_PROFILE_RELEASE_LTO: thin
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+  CARGO_PROFILE_RELEASE_STRIP: debuginfo
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          if (-not $tag) {
+            $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.*)"').Matches[0].Groups[1].Value
+            $tag = "v$version"
+          }
+          $name = "$env:BIN-$tag-$env:TRIPLE"
+          Copy-Item "target/release/$env:BIN.exe" "$name.exe"
+          "$((Get-FileHash "$name.exe" -Algorithm SHA256).Hash.ToLower())  $name.exe" |
+            Out-File -Encoding ascii SHA256SUMS
+          "asset_name=$name" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" `
+            "${{ env.asset_name }}.exe" "SHA256SUMS" --clobber
+
+      - name: Upload artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.asset_name }}
+          path: |
+            ${{ env.asset_name }}.exe
+            SHA256SUMS
