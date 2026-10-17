@@ -39,3 +39,8 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Gdi",
 ] }
 
+[profile.dev]
+# Debug info is most of the target directory. Line tables keep backtraces
+# readable while cutting link time and disk use; CI pins the same value.
+debug = "line-tables-only"
+

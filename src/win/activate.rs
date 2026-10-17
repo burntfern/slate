@@ -1,12 +1,42 @@
 use std::ffi::c_void;
 
+use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowRect, GetWindowThreadProcessId, IsIconic, PostMessageW, SetForegroundWindow,
-    SetWindowPos, ShowWindow, SWP_ASYNCWINDOWPOS, SWP_NOZORDER, SW_RESTORE, WM_CLOSE,
+    EnumWindows, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, SWP_ASYNCWINDOWPOS, SWP_NOZORDER, SW_RESTORE,
+    WM_CLOSE,
 };
+
+/// Bring any visible top-level window of `pid` to the front; used when a
+/// second copy of Slate finds one already running.
+pub fn activate_process(pid: u32) -> bool {
+    struct Search {
+        pid: u32,
+        found: isize,
+    }
+    unsafe extern "system" fn probe(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam.0 as *mut Search);
+        let mut window_pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+        if window_pid == search.pid && IsWindowVisible(hwnd).as_bool() {
+            search.found = hwnd.0 as isize;
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+    let mut search = Search { pid, found: 0 };
+    unsafe {
+        let _ = EnumWindows(Some(probe), LPARAM(std::ptr::addr_of_mut!(search) as isize));
+    }
+    if search.found != 0 {
+        activate_window(search.found)
+    } else {
+        false
+    }
+}
 
 pub fn activate_window(hwnd: isize) -> bool {
     let h = HWND(hwnd as *mut _);

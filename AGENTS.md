@@ -5,7 +5,9 @@ Rust + `gpui` + `ely_gpui_component`.
 
 ## Setup
 
-- Rust stable with the `x86_64-pc-windows-msvc` target and the Windows SDK.
+- The toolchain pinned in `rust-toolchain.toml` (rustup installs it on
+  demand) and the Windows SDK. That file also lists `aarch64-pc-windows-msvc`,
+  which only `release.yml` builds; day-to-day work is `x86_64`.
 - Build: `cargo build`
 - If cargo fails with `os error 1455` (paging/commit limit), add `-j 1`.
 
@@ -13,9 +15,9 @@ Rust + `gpui` + `ely_gpui_component`.
 
 ```powershell
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo build
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo build --locked
 ```
 
 `cargo test` covers only `src/core` and `src/config`. The UI (`src/ui`) and Win32

@@ -16,10 +16,10 @@
 </div>
 <br>
 
-> [!IMPORTANT]\
+> [!IMPORTANT]
 > **Slate is free, local, and open source.** It only rearranges windows that are already on your desktop - no app is ever launched for you, nothing is reparented into another process, and your settings stay in `%USERPROFILE%\.burntfern`.
 
-> [!WARNING]\
+> [!WARNING]
 > **Slate is under active development.** Expect bugs and rough edges, and please [open an issue](https://github.com/burntfern/slate/issues) if something breaks.
 
 > Built with **Rust** on **[gpui](https://github.com/zed-industries/zed)**.
@@ -44,6 +44,7 @@
 - **`Hover preview`** - rest on a tab for a live snapshot of its window
 - **`Global shortcuts`** - `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`, `Ctrl`+`1..9` and `Ctrl`+`W` keep working while a hosted window has focus
 - **`Tray icon`** - restore the host or exit from the notification area
+- **`Self-updating`** - when a new release is out, the update prompt downloads it, swaps it over the exe wherever you put it, and restarts Slate; a stray older copy is spotted and brought up to date in place, so pins and shortcuts keep working, and a second launch focuses the running window
 - **`Light and dark themes`** - following the system by default
 
 ## Gallery
@@ -136,21 +137,33 @@
 
 ## Install
 
-Grab the `slate-vX.Y.Z-x86_64-pc-windows-msvc.exe` asset from the
+Pick the asset that matches your CPU from the
 [latest release](https://github.com/burntfern/slate/releases/latest) and run it.
-Swap `X.Y.Z` for the version shown there. There is no installer and nothing else
-to install.
+Swap `X.Y.Z` for the version shown there. There is no installer and nothing
+else to install.
+
+| Asset                                       | For                                              |
+| ------------------------------------------- | ------------------------------------------------ |
+| `slate-vX.Y.Z-x64.exe`                      | Intel / AMD 64-bit PCs (most machines)           |
+| `slate-vX.Y.Z-arm64.exe`                    | ARM64 Windows (Surface, Snapdragon laptops)      |
+
+This page is only needed for the very first download: after that, updates
+install themselves - Slate offers an **Update now** prompt, replaces its own
+exe in place, and restarts.
 
 Releases are unsigned, so SmartScreen may warn on the first launch. To check a
 download, compare it against the published `SHA256SUMS`:
 
 ```powershell
-Get-FileHash .\slate-vX.Y.Z-x86_64-pc-windows-msvc.exe -Algorithm SHA256  # the file you downloaded
+Get-FileHash .\slate-vX.Y.Z-x64.exe -Algorithm SHA256  # match the file you downloaded
 ```
 
 ## Build from source
 
-You need the Rust stable toolchain with the MSVC target and the Windows SDK.
+You need Rust with the MSVC target and the Windows SDK. The exact toolchain
+and target list are pinned in `rust-toolchain.toml`, which rustup applies
+automatically (the `aarch64` target there is only for the ARM64 release build
+in CI; local `cargo build --release` produces the x64 exe).
 
 ```powershell
 cargo build --release
@@ -167,7 +180,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Shortcut                         | Action                                        |
 | -------------------------------- | --------------------------------------------- |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab`    | Next / previous tab                           |
-| `Ctrl+1` â€¦ `Ctrl+9`              | Jump to the Nth tab                           |
+| `Ctrl+1` to `Ctrl+9`             | Jump to the Nth tab                           |
 | `Ctrl+W`                         | Return the active tab's window to the desktop |
 | Ctrl-drag a window onto the host | Add it as a tab                               |
 | Hover a window, then `TAB`       | Add it as a tab (pick mode)                   |
@@ -180,6 +193,7 @@ Slate stores everything under `%USERPROFILE%\.burntfern`:
 - `config.json` - theme and accent
 - `slate\settings.json` - tab, preview, and shortcut settings
 - `slate\sets.json` - saved tab sets
+- `slate\install.json` - the registered copy (path, version, pid) that powers in-app updates and the single-instance check
 - `slate\backups\` - timestamped config backups
 
 On first run each file is seeded from the `configs\` folder that ships next to

@@ -1,17 +1,10 @@
 version: 2
 updates:
-  - package-ecosystem: cargo
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-    groups:
-      cargo:
-        patterns: ["*"]
-
+  # The cargo ecosystem is intentionally not tracked here. Dependabot cannot
+  # reach the git dependency host (ely-gpui-component lives on a self-hosted
+  # server), so every cargo run fails with git_dependencies_not_reachable.
+  # Rust updates come from `cargo update` by hand, with advisories covered by
+  # the weekly Deny workflow.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

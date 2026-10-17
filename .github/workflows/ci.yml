@@ -1,16 +1,39 @@
 name: CI
 
 on:
+  # PR runs execute at refs/pull/N/merge and can only restore caches from the
+  # default branch, never from `development` or their own head branch. The
+  # push run on main after a merge is therefore what seeds the cache every
+  # later PR restores; without it every PR rebuilds the world. Branch
+  # protection keeps direct pushes gated, so this run only fires on merges.
+  # development keeps its own push trigger for work without an open PR.
   push:
-    branches: [main, master, development]
+    branches: [main, development]
+  # PRs target either branch: contributors land work in `development` via PR,
+  # and release PRs land in `main`. Both get the same checks.
   pull_request:
+    branches: [main, development]
+
+permissions:
+  contents: read
+  # The prune step below deletes superseded caches; cache writes need this.
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
+  # The cargo cache is reused across commits, so incremental artifacts are pure
+  # overhead: they never match a fresh checkout and they bloat the archive.
+  CARGO_INCREMENTAL: "0"
+  # Debug info is most of the cached target directory. Line tables keep
+  # backtraces readable while cutting the archive from roughly 1 GB.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 concurrency:
+  # Cancel superseded runs on pull requests only. A push to main must always run
+  # to completion, otherwise back-to-back merges cancel the verification of the
+  # commit that actually shipped.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -18,15 +41,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Channel (stable), components and target are also pinned in
-      # rust-toolchain.toml; keep the two in step.
+      # The exact version is pinned here and in rust-toolchain.toml; keep the
+      # two in step rather than following stable silently.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Only the long-lived branches write the archive. Pull requests still
+          # restore it, but no longer each save their own copy and evict the
+          # others from the 10 GB budget.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development' }}
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -39,3 +68,32 @@ jobs:
 
       - name: Test
         run: cargo test --locked --verbose
+
+      # rust-cache keys change whenever Cargo.lock or the cargo env changes,
+      # and GitHub never removes the superseded entry (keys are write-once).
+      # Only the newest cache per branch can ever match again, and nothing at
+      # all can restore from refs/pull or refs/tags scopes - delete the rest
+      # so the 10 GB budget only holds live caches. The current run's own
+      # cache is saved after this step (post-job) and is always the newest on
+      # its branch, so the rule never removes it. Repo-side backup: set cache
+      # retention to 7 days under Settings -> Actions -> Cache retention.
+      - name: Prune superseded caches
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # List every cache whose key starts with rust-cache's prefix, then
+          # keep the newest per long-lived branch and delete everything else.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?key=v0-rust-build-&per_page=100" \
+            --jq '.actions_caches[] | [.id, .ref, .created_at] | @tsv' |
+          sort -t$'\t' -k2,2 -k3,3r |
+          awk -F'\t' '
+            !seen[$2]++ && ($2 == "refs/heads/main" || $2 == "refs/heads/development") { next }
+            { print $1 }
+          ' |
+          while read -r id; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" >/dev/null
+            echo "deleted superseded cache $id"
+          done

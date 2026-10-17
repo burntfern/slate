@@ -2,7 +2,8 @@ pub const REPOSITORY_URL: &str = "https://github.com/burntfern/slate";
 pub const RELEASES_URL: &str = "https://github.com/burntfern/slate/releases/latest";
 pub const LATEST_API_URL: &str = "https://api.github.com/repos/burntfern/slate/releases/latest";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const CHECK_COOLDOWN_SECS: i64 = 30;
+// Throttle for repeated menu clicks; also keeps API calls rare.
+pub const CHECK_COOLDOWN_SECS: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum UpdateState {
@@ -44,6 +45,53 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
     match (parse_version(current), parse_version(latest)) {
         (Some(current), Some(latest)) => latest > current,
         _ => false,
+    }
+}
+
+/// Release assets follow `release.yml` naming: slate-v{tag}-{arch}.exe.
+pub fn download_url(tag: &str, arch: &str) -> String {
+    format!("https://github.com/burntfern/slate/releases/download/v{tag}/slate-v{tag}-{arch}.exe")
+}
+
+/// What launching Slate reveals about the registered-exe record
+/// (`%USERPROFILE%\.burntfern\slate\install.json`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Startup {
+    /// No record, or it points at this very exe: carry on.
+    Continue,
+    /// A different copy is running right now; focus it and quit.
+    AlreadyRunning { pid: u32 },
+    /// The record names a different file that is not running: offer to
+    /// remove it if its version is older than the copy just launched.
+    StaleCopy { path: String, version: String },
+}
+
+/// `registered` is `(path, version, pid)` from the record, `current_exe` is
+/// the running binary, and `other_alive` says whether the recorded pid is
+/// still a live process (liveness itself is a Win32 concern, kept out here).
+pub fn classify_startup(
+    registered: Option<(&str, &str, u32)>,
+    current_exe: &str,
+    current_version: &str,
+    other_alive: bool,
+) -> Startup {
+    let Some((path, version, pid)) = registered else {
+        return Startup::Continue;
+    };
+    if path.eq_ignore_ascii_case(current_exe) {
+        return Startup::Continue;
+    }
+    if other_alive {
+        return Startup::AlreadyRunning { pid };
+    }
+    if is_newer(current_version, version) {
+        // The registered copy is the newer one, so running this old exe is a
+        // deliberate choice - allow it and let the record follow the last run.
+        return Startup::Continue;
+    }
+    Startup::StaleCopy {
+        path: path.to_string(),
+        version: version.to_string(),
     }
 }
 
@@ -100,6 +148,98 @@ mod tests {
             UpdateState::UpToDate
         );
         assert_eq!(UpdateState::from_cached("0.1.0", None), UpdateState::Idle);
+    }
+
+    #[test]
+    fn download_url_matches_release_asset_names() {
+        assert_eq!(
+            download_url("0.2.0", "x64"),
+            "https://github.com/burntfern/slate/releases/download/v0.2.0/slate-v0.2.0-x64.exe"
+        );
+        assert_eq!(
+            download_url("v0.2.0", "arm64"),
+            "https://github.com/burntfern/slate/releases/download/vv0.2.0/slate-vv0.2.0-arm64.exe"
+        );
+    }
+
+    #[test]
+    fn first_launch_or_same_path_continues() {
+        assert_eq!(
+            classify_startup(None, "C:\\a\\slate.exe", "0.1.0", false),
+            Startup::Continue
+        );
+        // Path compare is case-insensitive: Windows paths are.
+        assert_eq!(
+            classify_startup(
+                Some(("c:\\a\\SLATE.exe", "0.1.0", 7)),
+                "C:\\a\\slate.exe",
+                "0.1.0",
+                true
+            ),
+            Startup::Continue
+        );
+    }
+
+    #[test]
+    fn live_other_copy_wins_the_session() {
+        assert_eq!(
+            classify_startup(
+                Some(("C:\\a\\slate.exe", "0.1.0", 4242)),
+                "C:\\Downloads\\slate.exe",
+                "0.1.1",
+                true
+            ),
+            Startup::AlreadyRunning { pid: 4242 }
+        );
+    }
+
+    #[test]
+    fn dead_older_copy_is_offered_for_cleanup() {
+        assert_eq!(
+            classify_startup(
+                Some(("C:\\a\\slate-v0.1.0-x64.exe", "0.1.0", 4242)),
+                "C:\\Downloads\\slate-v0.1.1-x64.exe",
+                "0.1.1",
+                false
+            ),
+            Startup::StaleCopy {
+                path: "C:\\a\\slate-v0.1.0-x64.exe".into(),
+                version: "0.1.0".into(),
+            }
+        );
+        // Same version in another folder still leaves a stray copy behind.
+        assert!(matches!(
+            classify_startup(
+                Some(("C:\\a\\slate.exe", "0.1.0", 1)),
+                "C:\\b\\slate.exe",
+                "0.1.0",
+                false
+            ),
+            Startup::StaleCopy { .. }
+        ));
+    }
+
+    #[test]
+    fn dead_newer_copy_is_a_deliberate_rollback() {
+        assert_eq!(
+            classify_startup(
+                Some(("C:\\a\\slate.exe", "0.2.0", 4242)),
+                "C:\\a\\old\\slate.exe",
+                "0.1.0",
+                false
+            ),
+            Startup::Continue
+        );
+        // Unparseable recorded version behaves like no claim at all.
+        assert!(matches!(
+            classify_startup(
+                Some(("C:\\a\\slate.exe", "garbage", 1)),
+                "C:\\b\\slate.exe",
+                "0.1.0",
+                false
+            ),
+            Startup::StaleCopy { .. }
+        ));
     }
 
     #[test]
