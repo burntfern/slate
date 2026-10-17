@@ -34,12 +34,14 @@ pub(super) fn hover_card(
 
     let image = match preview.image.clone() {
         Some(img) => Image::new(("host-hover-shot", 0usize), img)
+            .rounded_t(rad_lg)
             .w_full()
             .h(px(IMAGE_H))
             .into_any_element(),
         None => div()
             .w_full()
             .h(px(IMAGE_H))
+            .rounded_t(rad_lg)
             .flex()
             .items_center()
             .justify_center()

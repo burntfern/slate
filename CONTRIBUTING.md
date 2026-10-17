@@ -11,13 +11,11 @@ Rust MSVC toolchain.
 ## Building
 
 ```powershell
-cargo build -j 1
+cargo build
 ```
 
-Use `-j 1`. Parallel builds on Windows can transiently fail with
-`os error 1455` ("paging file is too small") or `E0786`. These are not code
-errors. Retry the command. If a failure persists, read the output: it is
-usually a real compile error.
+> [!IMPORTANT]
+> The full dependency tree is memory hungry to compile. If cargo fails with `os error 1455` (a paging or commit-limit failure), rerun it with `-j 1` to build one crate at a time.
 
 ## Before opening a pull request
 
@@ -25,9 +23,9 @@ Run all of these and make sure they pass:
 
 ```powershell
 cargo fmt --all
-cargo clippy -j 1 --all-targets -- -D warnings
-cargo build -j 1
-cargo test -j 1
+cargo clippy --all-targets -- -D warnings
+cargo build
+cargo test
 ```
 
 `cargo clippy --all-targets` must be warning-free. The test suite covers the
@@ -53,7 +51,7 @@ Explain *why* in the body only when it is not obvious.
 
 ## Architecture
 
-Data flows one way: **UI → command → controller → Win32 → core state**. The UI
+Data flows one way: **UI -> command -> controller -> Win32 -> core state**. The UI
 never calls Win32 directly; it dispatches a `Cmd` and re-renders from the
 snapshot the controller publishes. See `src/controller/` for the command
 handling and `src/win/` for the platform layer.
