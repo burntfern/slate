@@ -71,6 +71,19 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Hover a window, then `TAB` | Add it as a tab (pick mode) |
 | `Esc` | Cancel pick mode or dismiss a menu |
 
+## Files and data
+
+Slate stores everything under `%USERPROFILE%\.burntfern`:
+
+- `config.json` — theme and accent
+- `slate\settings.json` — tab, preview, and shortcut settings
+- `slate\sets.json` — saved tab sets
+- `slate\logs\` and `slate\backups\` — rotated logs and config backups
+
+On first run each file is seeded from the `configs\` folder that ships next to
+the executable (or the working directory in a dev checkout). Deleting these
+files resets Slate to defaults.
+
 ## Limitations
 
 - **Windows only.** Slate relies on Win32 window ownership, DWM frame control,

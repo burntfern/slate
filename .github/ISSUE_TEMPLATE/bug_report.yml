@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a crash, a rendering glitch, or something not working
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For security issues, do not use this form:
+        report them privately instead, see `SECURITY.md`.
+  - type: input
+    id: version
+    attributes:
+      label: Slate version
+      description: The release tag (e.g. `v0.1.0`), or the `version` in `Cargo.toml` if built from source.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Run `winver` and paste the build (e.g. Windows 11 23H2, build 22631).
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Host this app ...
+        2. Drag a tab ...
+        3. See ...
+    validations:
+      required: true
+  - type: checkboxes
+    id: window
+    attributes:
+      label: Window specifics
+      description: Tick anything that applies.
+      options:
+        - label: The hosted app is elevated (running as administrator)
+        - label: Multiple monitors are in use
+        - label: The issue involves the picker, hover preview, or a menu

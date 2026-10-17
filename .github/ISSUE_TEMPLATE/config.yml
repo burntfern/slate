@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/burntfern/slate/security/advisories/new
+    about: Do not open a public issue for security problems. Use private reporting.
+  - name: Questions and usage help
+    url: https://github.com/burntfern/slate/discussions
+    about: Ask how to use Slate, or share setups.
