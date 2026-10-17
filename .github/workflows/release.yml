@@ -37,6 +37,11 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # A release runs on a fresh tag ref, so anything saved here is
+          # unreachable by every future run - restore is fine for re-runs of
+          # the same tag, but never write.
+          save-if: false
 
       # One job builds both arches so a single SHA256SUMS can cover them.
       # Asset names follow Windows arch wording: slate-vX-x64.exe and

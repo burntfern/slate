@@ -50,6 +50,17 @@ Explain *why* in the body only when it is not obvious.
 `<type>/<short-description>`, for example `fix/tab-underflow` or
 `refactor/split-controller`.
 
+## Which branch to target
+
+`main` is the release branch: it moves only through release-please and the
+occasional `development` -> `main` PR, and it is protected. Open your PR
+against **`development`**, and branch from the tip of `development`, not from
+`main`.
+
+Fork PRs are welcome. The same CI runs on them (no workflow step needs a
+secret), they restore the cache seeded from `main`, and GitHub does not let
+fork PRs write caches - that is expected, not a failure.
+
 ## Architecture
 
 Data flows one way: **UI -> command -> controller -> Win32 -> core state**. The UI
