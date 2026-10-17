@@ -2,6 +2,7 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CombineRgn, CreateRectRgn, CreateSolidBrush, DeleteObject, SetWindowRgn, HGDIOBJ, RGN_DIFF,
+    RGN_ERROR,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -69,10 +70,21 @@ impl Highlight {
         unsafe {
             let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE);
             let outer = CreateRectRgn(0, 0, w, h);
+            if outer.0.is_null() {
+                return;
+            }
             let inset_w = (w - BORDER).max(BORDER + 1);
             let inset_h = (h - BORDER).max(BORDER + 1);
             let inner = CreateRectRgn(BORDER, BORDER, inset_w, inset_h);
-            CombineRgn(Some(outer), Some(outer), Some(inner), RGN_DIFF);
+            if inner.0.is_null() {
+                let _ = DeleteObject(HGDIOBJ(outer.0));
+                return;
+            }
+            if CombineRgn(Some(outer), Some(outer), Some(inner), RGN_DIFF) == RGN_ERROR {
+                let _ = DeleteObject(HGDIOBJ(inner.0));
+                let _ = DeleteObject(HGDIOBJ(outer.0));
+                return;
+            }
             let _ = DeleteObject(HGDIOBJ(inner.0));
             if SetWindowRgn(self.hwnd, Some(outer), true) == 0 {
                 let _ = DeleteObject(HGDIOBJ(outer.0));

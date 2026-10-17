@@ -28,7 +28,10 @@ fn main() {
     gpui_platform::application()
         .with_assets(Assets)
         .run(|cx: &mut gpui::App| {
-            ely_gpui_component::init(cx).expect("Ely failed to start");
+            if let Err(err) = ely_gpui_component::init(cx) {
+                eprintln!("Slate: Ely failed to start: {err:?}");
+                std::process::exit(1);
+            }
             let controller = cx.new(controller::Controller::new);
 
             let bounds = Bounds::centered(None, size(px(1100.0), px(720.0)), cx);
@@ -42,10 +45,12 @@ fn main() {
                 window_min_size: Some(size(px(640.0), px(420.0))),
                 ..Default::default()
             };
-            cx.open_window(options, move |_window, cx| {
+            if let Err(err) = cx.open_window(options, move |_window, cx| {
                 cx.new(|cx| ui::HostWindow::new(controller, cx))
-            })
-            .expect("host window failed to open");
+            }) {
+                eprintln!("Slate: host window failed to open: {err:?}");
+                std::process::exit(1);
+            }
 
             cx.activate(true);
         });

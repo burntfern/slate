@@ -2,10 +2,9 @@
 name = "slate"
 version = "0.0.0"
 edition = "2021"
-description = "Universal Window Tabs for Windows"
+description = "Real tabs for Windows"
 license = "GPL-3.0-only"
 repository = "https://github.com/burntfern/slate"
-authors = ["burntfern"]
 readme = "README.md"
 publish = false
 keywords = ["tabs", "windows", "window-manager", "gpui", "desktop"]

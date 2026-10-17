@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::SetWindowRgn;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, IsIconic, IsZoomed, SetWindowLongPtrW,
-    SetWindowPlacement, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_HWNDPARENT, GWL_STYLE,
+    SetWindowPlacement, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_HWNDPARENT, GWL_STYLE, HWND_TOP,
     SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SW_HIDE, SW_RESTORE, SW_SHOWMINIMIZED, SW_SHOWMINNOACTIVE, SW_SHOWNA, WINDOWPLACEMENT,
     WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
@@ -23,6 +23,7 @@ const FRAME: isize = WS_CAPTION.0 as isize
 pub struct StylingState {
     pub style: isize,
     pub exstyle: isize,
+    pub owner: isize,
     pub rect: (i32, i32, i32, i32),
     pub placement: WINDOWPLACEMENT,
 }
@@ -54,6 +55,7 @@ pub fn register_member(host: isize, member: isize) -> Option<StylingState> {
         }
         let style = GetWindowLongPtrW(mh, GWL_STYLE);
         let exstyle = GetWindowLongPtrW(mh, GWL_EXSTYLE);
+        let owner = GetWindowLongPtrW(mh, GWL_HWNDPARENT);
         if !set_long_ptr(mh, GWL_HWNDPARENT, host) {
             return None;
         }
@@ -64,8 +66,7 @@ pub fn register_member(host: isize, member: isize) -> Option<StylingState> {
         if IsIconic(mh).as_bool() || IsZoomed(mh).as_bool() {
             let _ = ShowWindow(mh, SW_RESTORE);
         }
-        // Stay hidden until the worker pins it, so it never flashes at its old
-        // desktop position during the hand-off.
+        // Stay hidden until the worker pins it, so it never flashes at its old desktop position.
         let _ = ShowWindow(mh, SW_HIDE);
         let _ = SetWindowPos(
             mh,
@@ -79,6 +80,7 @@ pub fn register_member(host: isize, member: isize) -> Option<StylingState> {
         Some(StylingState {
             style,
             exstyle,
+            owner,
             rect: (r.left, r.top, r.right, r.bottom),
             placement,
         })
@@ -117,11 +119,10 @@ pub fn unregister_member(member: isize, st: &StylingState) {
         let minimized = IsIconic(mh).as_bool() || st.placement.showCmd as i32 == SW_SHOWMINIMIZED.0;
         let _ = ShowWindow(mh, SW_HIDE);
         let _ = SetWindowRgn(mh, None, true);
-        let _ = set_long_ptr(mh, GWL_HWNDPARENT, 0);
+        // Un-own first: an owned window has no taskbar button, so clicking its old spot does nothing.
+        let _ = set_long_ptr(mh, GWL_HWNDPARENT, st.owner);
         let _ = set_long_ptr(mh, GWL_STYLE, st.style);
-        // Clearing the owner alone leaves the window missing from the taskbar
-        // until the user reactivates it; bouncing WS_EX_TOOLWINDOW (framechanged)
-        // makes the shell rebuild the button now.
+        // The shell only rebuilds the taskbar button on a frame change, so bounce WS_EX_TOOLWINDOW synchronously (no ASYNC) after clearing the owner.
         let ex = GetWindowLongPtrW(mh, GWL_EXSTYLE);
         let _ = set_long_ptr(mh, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
         let _ = SetWindowPos(
@@ -131,12 +132,7 @@ pub fn unregister_member(member: isize, st: &StylingState) {
             0,
             0,
             0,
-            SWP_NOMOVE
-                | SWP_NOSIZE
-                | SWP_NOZORDER
-                | SWP_FRAMECHANGED
-                | SWP_NOACTIVATE
-                | SWP_ASYNCWINDOWPOS,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE,
         );
         let _ = set_long_ptr(mh, GWL_EXSTYLE, st.exstyle);
         set_frame_treatment(mh, false);
@@ -144,14 +140,15 @@ pub fn unregister_member(member: isize, st: &StylingState) {
         let (l, t, r, b) = st.rect;
         let w = (r - l).max(0);
         let h = (b - t).max(0);
+        // Restore the rect, rebuild the frame with the final exstyle (taskbar button appears now), and raise above the host so it is clickable at once.
         let _ = SetWindowPos(
             mh,
-            None,
+            Some(HWND_TOP),
             l,
             t,
             w,
             h,
-            SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
         );
         let _ = ShowWindow(
             mh,

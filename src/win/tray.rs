@@ -6,9 +6,9 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, GetCursorPos,
     PostMessageW, RegisterClassW, SetForegroundWindow, ShowWindow, TrackPopupMenu, HICON,
-    MF_STRING, SW_RESTORE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
-    WS_OVERLAPPED,
+    HWND_MESSAGE, MF_STRING, SW_RESTORE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP,
+    WM_NULL, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use super::icon;
@@ -83,6 +83,8 @@ unsafe fn show_menu(hwnd: HWND) {
             None,
         );
         let _ = DestroyMenu(menu);
+        // Dismiss the menu if the user clicked away instead of choosing an item.
+        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
         match cmd.0 {
             CMD_SHOW => restore_host(),
             CMD_EXIT => {
@@ -144,12 +146,12 @@ impl TrayIcon {
                 WINDOW_EX_STYLE(0),
                 windows::core::PCWSTR(class.as_ptr()),
                 windows::core::PCWSTR(class.as_ptr()),
-                WS_OVERLAPPED,
+                WINDOW_STYLE(0),
                 0,
                 0,
                 0,
                 0,
-                None,
+                Some(HWND_MESSAGE),
                 None,
                 Some(HINSTANCE(module.0)),
                 None,

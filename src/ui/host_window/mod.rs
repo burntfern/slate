@@ -249,6 +249,9 @@ impl Render for HostWindow {
                 info.tab_menu.is_some(),
             );
             move |_ev: &gpui::MouseDownEvent, _w: &mut Window, cx: &mut App| {
+                if !(overlay || tab_menu || picker || saved || ctx_menu) {
+                    return;
+                }
                 ctrl.update(cx, |c, cx| {
                     if overlay {
                         c.dispatch(Cmd::SetOverlay(false), cx);
@@ -271,17 +274,41 @@ impl Render for HostWindow {
 
         let escape = {
             let ctrl = controller.clone();
+            let (overlay, tab_menu, picker, saved, renaming, prompt) = (
+                info.overlay,
+                info.tab_menu_open,
+                info.picker_open,
+                info.saved_menu_open,
+                info.renaming.is_some(),
+                info.saved_prompt.is_some(),
+            );
             move |ev: &gpui::KeyDownEvent, _w: &mut Window, cx: &mut App| {
-                if ev.keystroke.key == "escape" {
-                    ctrl.update(cx, |c, cx| {
-                        c.dispatch(Cmd::SetOverlay(false), cx);
-                        c.dispatch(Cmd::SetTabMenu(false), cx);
-                        c.dispatch(Cmd::SetPickerOpen(false), cx);
-                        c.dispatch(Cmd::SetSavedMenu(false), cx);
-                        c.dispatch(Cmd::CancelRename, cx);
-                        c.dispatch(Cmd::CancelSavedPrompt, cx);
-                    });
+                if ev.keystroke.key != "escape" {
+                    return;
                 }
+                if !(overlay || tab_menu || picker || saved || renaming || prompt) {
+                    return;
+                }
+                ctrl.update(cx, |c, cx| {
+                    if overlay {
+                        c.dispatch(Cmd::SetOverlay(false), cx);
+                    }
+                    if tab_menu {
+                        c.dispatch(Cmd::SetTabMenu(false), cx);
+                    }
+                    if picker {
+                        c.dispatch(Cmd::SetPickerOpen(false), cx);
+                    }
+                    if saved {
+                        c.dispatch(Cmd::SetSavedMenu(false), cx);
+                    }
+                    if renaming {
+                        c.dispatch(Cmd::CancelRename, cx);
+                    }
+                    if prompt {
+                        c.dispatch(Cmd::CancelSavedPrompt, cx);
+                    }
+                });
             }
         };
 
@@ -322,8 +349,7 @@ impl Render for HostWindow {
             || info.saved_menu_open
             || info.tab_menu.is_some()
             || info.renaming.is_some()
-            || info.saved_prompt.is_some()
-            || info.hover_preview.is_some();
+            || info.saved_prompt.is_some();
         let body = match (info.tabs.is_empty(), overlaying) {
             (true, _) => {
                 let caption = Caption::new("No windows yet").into_any_element();
@@ -341,13 +367,7 @@ impl Render for HostWindow {
                 empty_state(cx, self.empty_icon.clone(), caption, hint)
             }
             (false, true) => {
-                let n = info.tabs.len();
-                let noun = if n == 1 {
-                    "window open"
-                } else {
-                    "windows open"
-                };
-                let caption = Caption::new(format!("{n} {noun}")).into_any_element();
+                let caption = Caption::new(info.caption.clone()).into_any_element();
                 let hint = div()
                     .flex()
                     .items_center()

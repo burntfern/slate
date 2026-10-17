@@ -7,9 +7,9 @@ use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Threading::PROCESS_NAME_WIN32;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    EnumWindows, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE, GW_OWNER,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 thread_local! {
@@ -109,15 +109,19 @@ unsafe fn metadata(
 }
 
 unsafe fn window_text(hwnd: HWND) -> String {
+    let len = GetWindowTextLengthW(hwnd);
+    if len <= 0 {
+        return String::new();
+    }
     TEXT_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
         buf.clear();
-        buf.resize(512, 0);
-        let len = GetWindowTextW(hwnd, buf.as_mut_slice());
-        if len <= 0 {
+        buf.resize(len as usize + 1, 0);
+        let copied = GetWindowTextW(hwnd, buf.as_mut_slice());
+        if copied <= 0 {
             String::new()
         } else {
-            String::from_utf16_lossy(&buf[..len as usize])
+            String::from_utf16_lossy(&buf[..copied as usize])
                 .trim()
                 .to_string()
         }
@@ -125,17 +129,24 @@ unsafe fn window_text(hwnd: HWND) -> String {
 }
 
 unsafe fn window_class(hwnd: HWND) -> String {
+    const MAX_CLASS: usize = 4096;
     CLASS_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        buf.clear();
-        buf.resize(256, 0);
-        let len = GetClassNameW(hwnd, buf.as_mut_slice());
-        if len <= 0 {
-            String::new()
-        } else {
-            String::from_utf16_lossy(&buf[..len as usize])
-                .trim()
-                .to_string()
+        let mut cap = 256usize;
+        loop {
+            buf.clear();
+            buf.resize(cap, 0);
+            let len = GetClassNameW(hwnd, buf.as_mut_slice());
+            if len <= 0 {
+                return String::new();
+            }
+            let len = len as usize;
+            if len < cap || cap >= MAX_CLASS {
+                return String::from_utf16_lossy(&buf[..len.min(buf.len())])
+                    .trim()
+                    .to_string();
+            }
+            cap = (cap * 2).min(MAX_CLASS);
         }
     })
 }

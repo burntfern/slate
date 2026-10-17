@@ -16,13 +16,21 @@ pub(super) fn hover_card(
 ) -> gpui::AnyElement {
     const CARD_W: f32 = 224.0;
     const IMAGE_H: f32 = 126.0;
+    const CARD_H: f32 = IMAGE_H + 40.0;
     const MARGIN: f32 = 8.0;
     const GAP: f32 = 6.0;
     let theme = cx.theme();
     let colors = &theme.colors;
     let rad_lg = theme.radius(Radius::Lg);
     let (x, y, _w, h) = preview.anchor;
+    let vh = viewport.height.as_f32();
     let left = x.min(viewport.width.as_f32() - CARD_W - MARGIN).max(MARGIN);
+    let below = y + h + GAP;
+    let top = if below + CARD_H <= vh - MARGIN {
+        below
+    } else {
+        (y - GAP - CARD_H).max(MARGIN)
+    };
 
     let image = match preview.image.clone() {
         Some(img) => Image::new(("host-hover-shot", 0usize), img)
@@ -87,8 +95,7 @@ pub(super) fn hover_card(
         .id(("host-hover", preview.tab.0 as usize))
         .absolute()
         .left(px(left))
-        .top(px(y + h))
-        .pt(px(GAP))
+        .top(px(top))
         .on_hover(on_hover)
         .with_animation(
             ("host-hover-anim", preview.tab.0 as usize),

@@ -52,6 +52,16 @@ fn stale_remove_is_noop() {
 }
 
 #[test]
+fn removing_last_tab_drops_the_group() {
+    let mut s = GroupSet::new();
+    let g = s.create_group(vec![win(100, "a.exe", "A")]);
+    let tab = s.group(g).unwrap().tabs[0].id;
+    assert_eq!(s.remove_tab(g, tab), Effect::Applied);
+    assert!(s.group(g).is_none());
+    assert!(s.groups().is_empty());
+}
+
+#[test]
 fn window_destroyed_clears_tab_and_reactivates() {
     let mut s = GroupSet::new();
     let g = s.create_group(vec![win(100, "a.exe", "A"), win(200, "b.exe", "B")]);
@@ -62,6 +72,28 @@ fn window_destroyed_clears_tab_and_reactivates() {
     assert_eq!(group.tabs[0].window.hwnd, 200);
     assert_eq!(group.active, Some(group.tabs[0].id));
     assert_eq!(s.window_destroyed(active_hwnd), Effect::Noop);
+}
+
+#[test]
+fn destroying_last_window_drops_the_group() {
+    let mut s = GroupSet::new();
+    let g = s.create_group(vec![win(100, "a.exe", "A")]);
+    assert_eq!(s.window_destroyed(100), Effect::Applied);
+    assert!(s.group(g).is_none());
+    assert!(s.groups().is_empty());
+}
+
+#[test]
+fn add_window_to_unknown_group_is_a_clean_noop() {
+    let mut s = GroupSet::new();
+    assert_eq!(
+        s.add_window(GroupId(7), win(100, "a.exe", "A")),
+        Effect::Noop
+    );
+    assert!(s.groups().is_empty());
+    let g = s.create_group(vec![]);
+    assert_eq!(s.add_window(g, win(100, "a.exe", "A")), Effect::Applied);
+    assert_eq!(s.group(g).unwrap().tabs[0].id, TabId(0));
 }
 
 #[test]
@@ -85,6 +117,22 @@ fn reorder_moves_tab() {
 }
 
 #[test]
+fn reorder_beyond_end_clamps() {
+    let mut s = GroupSet::new();
+    let g = s.create_group(vec![win(100, "a.exe", "A"), win(200, "b.exe", "B")]);
+    let first = s.group(g).unwrap().tabs[0].id;
+    assert_eq!(s.reorder(g, first, 99), Effect::Applied);
+    let order: Vec<isize> = s
+        .group(g)
+        .unwrap()
+        .tabs
+        .iter()
+        .map(|t| t.window.hwnd)
+        .collect();
+    assert_eq!(order, vec![200, 100]);
+}
+
+#[test]
 fn update_title_only_touches_matching_hwnd() {
     let mut s = GroupSet::new();
     let g = s.create_group(vec![win(100, "a.exe", "Old"), win(200, "b.exe", "B")]);
@@ -92,6 +140,15 @@ fn update_title_only_touches_matching_hwnd() {
     assert_eq!(s.update_title(100, "New"), Effect::Noop);
     assert_eq!(s.group(g).unwrap().tabs[0].window.title, "New");
     assert_eq!(s.group(g).unwrap().tabs[1].window.title, "B");
+}
+
+#[test]
+fn window_destroyed_of_non_active_tab_keeps_active() {
+    let mut s = GroupSet::new();
+    let g = s.create_group(vec![win(100, "a.exe", "A"), win(200, "b.exe", "B")]);
+    let active = s.group(g).unwrap().active;
+    assert_eq!(s.window_destroyed(200), Effect::Applied);
+    assert_eq!(s.group(g).unwrap().active, active);
 }
 
 #[test]

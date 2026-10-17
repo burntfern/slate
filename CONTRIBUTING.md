@@ -42,8 +42,9 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 type(scope): lowercase imperative summary
 ```
 
-Common types: `feat`, `fix`, `refactor`, `perf`, `docs`, `ci`, `chore`. Keep the
-subject on one line. Explain *why* in the body only when it is not obvious.
+Common types: `feat`, `fix`, `refactor`, `perf`, `docs`, `build`, `ci`, `chore`,
+and `init` (reserved for the first release commit). Keep the subject on one line.
+Explain *why* in the body only when it is not obvious.
 
 ## Branch naming
 

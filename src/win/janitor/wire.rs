@@ -1,11 +1,11 @@
 use crate::win::host::StylingState;
 
-const MAGIC: u32 = 0x534C_4A31;
+const MAGIC: u32 = 0x534C_4A32;
 const PLACEMENT_LEN: usize =
     std::mem::size_of::<windows::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT>();
 
 pub fn encode(slate_hwnd: isize, members: &[(isize, StylingState)]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(16 + members.len() * (4 * 8 + 16 + PLACEMENT_LEN));
+    let mut b = Vec::with_capacity(16 + members.len() * (5 * 8 + 16 + PLACEMENT_LEN));
     b.extend_from_slice(&MAGIC.to_le_bytes());
     b.extend_from_slice(&(slate_hwnd as i64).to_le_bytes());
     b.extend_from_slice(&(members.len() as u32).to_le_bytes());
@@ -13,6 +13,7 @@ pub fn encode(slate_hwnd: isize, members: &[(isize, StylingState)]) -> Vec<u8> {
         b.extend_from_slice(&(*hwnd as i64).to_le_bytes());
         b.extend_from_slice(&(st.style as i64).to_le_bytes());
         b.extend_from_slice(&(st.exstyle as i64).to_le_bytes());
+        b.extend_from_slice(&(st.owner as i64).to_le_bytes());
         let (l, t, r, bo) = st.rect;
         for v in [l, t, r, bo] {
             b.extend_from_slice(&v.to_le_bytes());
@@ -31,7 +32,7 @@ pub fn decode(bytes: &[u8]) -> Option<(isize, Vec<(isize, StylingState)>)> {
     }
     let slate_hwnd = i64::from_le_bytes(bytes[4..12].try_into().ok()?) as isize;
     let count = u32::from_le_bytes(bytes[12..16].try_into().ok()?) as usize;
-    const PER_MEMBER: usize = 8 + 8 + 8 + 16 + PLACEMENT_LEN;
+    const PER_MEMBER: usize = 4 * 8 + 16 + PLACEMENT_LEN;
     if count > bytes.len().saturating_sub(16) / PER_MEMBER {
         return None;
     }
@@ -43,6 +44,8 @@ pub fn decode(bytes: &[u8]) -> Option<(isize, Vec<(isize, StylingState)>)> {
         let style = i64::from_le_bytes(bytes.get(off..off + 8)?.try_into().ok()?) as isize;
         off += 8;
         let exstyle = i64::from_le_bytes(bytes.get(off..off + 8)?.try_into().ok()?) as isize;
+        off += 8;
+        let owner = i64::from_le_bytes(bytes.get(off..off + 8)?.try_into().ok()?) as isize;
         off += 8;
         let rd = |o: usize| -> Option<i32> {
             Some(i32::from_le_bytes(bytes.get(o..o + 4)?.try_into().ok()?))
@@ -65,6 +68,7 @@ pub fn decode(bytes: &[u8]) -> Option<(isize, Vec<(isize, StylingState)>)> {
             StylingState {
                 style,
                 exstyle,
+                owner,
                 rect: (l, t, r, bo),
                 placement,
             },
@@ -95,6 +99,7 @@ mod tests {
         StylingState {
             style: 0x16CF_0000,
             exstyle: 0x100,
+            owner: 0x99,
             rect: (10, 20, 300, 400),
             placement,
         }

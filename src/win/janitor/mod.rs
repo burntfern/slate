@@ -105,6 +105,8 @@ fn parse_state_name(name: &str) -> Option<u32> {
 }
 
 fn process_alive(pid: u32) -> bool {
+    // ERROR_INVALID_PARAMETER (87) means the pid is gone; any other error (e.g. access denied for an elevated process) counts as alive.
+    const ERROR_INVALID_PARAMETER_LOW: u32 = 87;
     unsafe {
         match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
             Ok(handle) => {
@@ -112,7 +114,7 @@ fn process_alive(pid: u32) -> bool {
                 let _ = CloseHandle(handle);
                 alive
             }
-            Err(_) => true,
+            Err(e) => (e.code().0 as u32 & 0xFFFF) != ERROR_INVALID_PARAMETER_LOW,
         }
     }
 }

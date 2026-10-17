@@ -26,28 +26,21 @@ fn main() {
     }
 
     let requested = std::env::var("SLATE_ICON").unwrap_or_default();
-    let selected = if !requested.is_empty() && resolve(&requested).is_some() {
-        resolve(&requested).expect("checked")
-    } else {
+    let selected = if requested.is_empty() {
         resolve(DEFAULT_LOGO)
             .unwrap_or_else(|| panic!("default logo `{DEFAULT_LOGO}` not found in {LOGO_DIRS:?}"))
+    } else {
+        match resolve(&requested) {
+            Some(path) => path,
+            None => panic!("SLATE_ICON `{requested}` not found in {LOGO_DIRS:?}"),
+        }
     };
 
-    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR set by cargo");
-    let icons_dir = std::path::Path::new("assets").join("icons");
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
+    std::fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|e| panic!("create {}: {e}", out_dir.display()));
 
-    for name in LOGO_SOURCES {
-        if let Some(path) = resolve(name) {
-            if path.extension().and_then(|e| e.to_str()) == Some("png") {
-                if let Ok(bytes) = ico_bytes(&path) {
-                    let _ = std::fs::create_dir_all(&icons_dir);
-                    let _ = std::fs::write(icons_dir.join(format!("{name}.ico")), bytes);
-                }
-            }
-        }
-    }
-
-    let ico_path = std::path::Path::new(&out_dir).join("slate.ico");
+    let ico_path = out_dir.join("slate.ico");
     if selected.extension().and_then(|e| e.to_str()) == Some("ico") {
         std::fs::copy(&selected, &ico_path)
             .unwrap_or_else(|e| panic!("copy {}: {e}", selected.display()));
@@ -55,7 +48,7 @@ fn main() {
         make_ico(&selected, &ico_path);
     }
 
-    let rc_path = std::path::Path::new(&out_dir).join("slate.rc");
+    let rc_path = out_dir.join("slate.rc");
     let ico_lit = ico_path.display().to_string().replace('\\', "\\\\");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
     let (v1, v2, v3, v4) = version_quad(&version);
@@ -84,7 +77,7 @@ BEGIN
 END
 "#
     );
-    std::fs::write(&rc_path, rc).expect("write slate.rc");
+    std::fs::write(&rc_path, rc).unwrap_or_else(|e| panic!("write {}: {e}", rc_path.display()));
 
     if let Err(err) = embed_resource::compile(&rc_path, embed_resource::NONE).manifest_optional() {
         panic!("embed icon/version resource: {err}");

@@ -23,7 +23,7 @@ fn queue() -> &'static Mutex<Vec<Shortcut>> {
     QUEUE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-const MAX_OWNED: usize = 64;
+const MAX_OWNED: usize = 1024;
 
 struct OwnedSet {
     len: AtomicUsize,

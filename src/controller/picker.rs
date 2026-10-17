@@ -1,18 +1,21 @@
 use super::dto::PickerRow;
 use super::Controller;
-use crate::win::is_blacklisted;
+use crate::win::{enumerate_windows, is_blacklisted};
+use std::collections::HashSet;
 
 impl Controller {
     pub(super) fn set_picker_open(&mut self, open: bool) {
         if open {
             self.close_other_dropdowns();
+            // Re-scan so windows opened since the last scan show up without a manual refresh.
+            self.windows = enumerate_windows();
             self.refresh_picker();
         }
         self.picker_open = open;
     }
 
     pub(super) fn refresh_picker(&mut self) {
-        let hosted: Vec<isize> = self.styling.keys().copied().collect();
+        let hosted: HashSet<isize> = self.styling.keys().copied().collect();
         let eligible: Vec<isize> = self
             .windows
             .iter()
@@ -48,12 +51,7 @@ impl Controller {
                 }
             })
             .collect();
-        rows.sort_by(|a, b| {
-            a.reason
-                .is_some()
-                .cmp(&b.reason.is_some())
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        });
+        rows.sort_by_cached_key(|row| (row.reason.is_some(), row.title.to_lowercase()));
         self.picker_rows = rows;
     }
 }

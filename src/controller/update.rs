@@ -11,7 +11,7 @@ impl Controller {
             return;
         }
         let now = update::now_secs();
-        if now - self.settings.updates.checked_at < CHECK_COOLDOWN_SECS {
+        if now.saturating_sub(self.settings.updates.checked_at) < CHECK_COOLDOWN_SECS {
             return;
         }
         self.settings.updates.checked_at = now;

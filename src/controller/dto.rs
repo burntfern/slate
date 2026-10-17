@@ -1,6 +1,6 @@
 use ely_gpui_component::feedback::Toast;
 use ely_gpui_component::primitives::Severity;
-use gpui::RenderImage;
+use gpui::{RenderImage, SharedString};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -127,7 +127,7 @@ pub struct TabInfo {
     pub accent: Option<usize>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct HostInfo {
     pub group: Option<GroupId>,
     pub tabs: Vec<TabInfo>,
@@ -148,7 +148,10 @@ pub struct HostInfo {
     pub hover_preview: Option<HoverPreview>,
     pub show_tab_bar: bool,
     pub update: UpdateState,
-    pub version: &'static str,
+    /// Precomputed so the render pass does not build these strings every frame.
+    pub caption: SharedString,
+    pub version_label: SharedString,
+    pub update_label: SharedString,
 }
 
 #[derive(Clone)]
@@ -170,8 +173,9 @@ pub struct PickerRow {
 pub struct SavedSetInfo {
     pub id: u64,
     pub name: String,
-    pub count: usize,
     pub available: usize,
+    /// Precomputed availability summary for the row subtitle.
+    pub detail: SharedString,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -208,11 +212,13 @@ pub(super) fn app_name(exe_name: &str) -> String {
 }
 
 pub(super) fn render_image(px: IconPixels) -> Option<Arc<RenderImage>> {
-    let buffer = image::RgbaImage::from_raw(px.width, px.height, px.rgba)?;
+    // gpui's RenderImage buffers are BGRA, so the DIB order is passed through unchanged.
+    let buffer = image::RgbaImage::from_raw(px.width, px.height, px.bgra)?;
     Some(crate::ui::render_image(buffer))
 }
 
 pub(super) fn render_snapshot(snap: WindowSnapshot) -> Option<Arc<RenderImage>> {
-    let buffer = image::RgbaImage::from_raw(snap.width, snap.height, snap.rgba)?;
+    // gpui's RenderImage buffers are BGRA, so the DIB order is passed through unchanged.
+    let buffer = image::RgbaImage::from_raw(snap.width, snap.height, snap.bgra)?;
     Some(crate::ui::render_image(buffer))
 }

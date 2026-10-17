@@ -51,6 +51,7 @@ impl Controller {
                 PickKey::Escape => self.end_pick(),
             }
             self.sync_worker();
+            self.invalidate_info();
             cx.notify();
             return true;
         }
@@ -59,6 +60,7 @@ impl Controller {
         if self.hovered != hovered {
             self.hovered = hovered;
             self.update_highlight();
+            self.invalidate_info();
             cx.notify();
         }
         false

@@ -12,6 +12,10 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
@@ -23,3 +27,6 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Unmaintained-only, all transitive through gpui/ely; no upgrade on our
+          # side. Mirrors the same ignores in deny.toml.
+          ignore: "RUSTSEC-2024-0436 RUSTSEC-2026-0206 RUSTSEC-2026-0192"

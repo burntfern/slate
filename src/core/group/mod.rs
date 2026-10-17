@@ -58,6 +58,17 @@ impl GroupSet {
             .any(|g| g.tabs.iter().any(|t| t.window.hwnd == hwnd))
     }
 
+    pub fn remove_empty(&mut self) -> bool {
+        let before = self.groups.len();
+        self.groups.retain(|g| !g.tabs.is_empty());
+        if self.groups.len() != before {
+            self.bump();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn create_group(&mut self, windows: Vec<WindowIdentity>) -> GroupId {
         let id = GroupId(self.next_group);
         self.next_group += 1;
@@ -75,6 +86,9 @@ impl GroupSet {
 
     pub fn add_window(&mut self, id: GroupId, window: WindowIdentity) -> Effect {
         if self.contains_window(window.hwnd) {
+            return Effect::Noop;
+        }
+        if self.group(id).is_none() {
             return Effect::Noop;
         }
         let tid = TabId(self.next_tab);
@@ -103,6 +117,7 @@ impl GroupSet {
             g.active = g.tabs.first().map(|t| t.id);
         }
         self.bump();
+        self.remove_empty();
         Effect::Applied
     }
 
@@ -121,6 +136,7 @@ impl GroupSet {
         }
         if applied {
             self.bump();
+            self.remove_empty();
             Effect::Applied
         } else {
             Effect::Noop

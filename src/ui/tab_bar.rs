@@ -11,7 +11,7 @@ use ely_gpui_component::{
 use gpui::{
     canvas, div, prelude::*, px, Animation, AnimationExt, App, Bounds, ElementId, EntityId,
     FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point,
-    RenderImage, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
+    RenderImage, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 #[derive(Clone)]
 pub enum TabIcon {
@@ -172,6 +172,9 @@ impl RenderOnce for SlateTabBar {
             };
             div()
                 .id(tab.id.clone())
+                .role(Role::Tab)
+                .aria_selected(selected)
+                .aria_label(title.clone())
                 .group(group.clone())
                 .flex()
                 .flex_1()
@@ -303,13 +306,14 @@ impl RenderOnce for SlateTabBar {
                     )
                 })
                 .with_animation(
-                    SharedString::from(format!("tab-in-{}", tab.id)),
+                    ("tab-in", ix),
                     Animation::new(enter).with_easing(motion::ease_out_cubic),
                     move |el, t| el.opacity(t).mt(nudge * (1.0 - t)),
                 )
         });
         div()
             .id(self.id)
+            .role(Role::TabList)
             .flex()
             .flex_none()
             .items_center()

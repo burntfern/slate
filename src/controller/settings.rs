@@ -23,7 +23,7 @@ impl Controller {
     }
 
     pub(super) fn save_settings(&self) {
-        config::save(&self.settings);
+        let _ = config::save(&self.settings);
     }
 
     pub(super) fn apply_theme(&self, cx: &mut Context<Self>) {
@@ -49,7 +49,7 @@ impl Controller {
             Mode::Light => "light".to_string(),
         };
         Theme::set_mode_now(next, cx);
-        self.save_settings();
+        let _ = config::save_theme(&self.settings.theme, &self.settings.accent);
     }
 
     pub(super) fn ensure_icon(&mut self, hwnd: isize) {

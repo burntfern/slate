@@ -37,10 +37,21 @@ impl Default for HostShared {
 
 #[derive(Clone)]
 pub struct HostWorker {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
     shared: Arc<Mutex<HostShared>>,
     running: Arc<AtomicBool>,
-    started: Arc<AtomicBool>,
+    started: AtomicBool,
     wake: Arc<(Mutex<()>, Condvar)>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        self.wake.1.notify_all();
+    }
 }
 
 impl Default for HostWorker {
@@ -52,31 +63,33 @@ impl Default for HostWorker {
 impl HostWorker {
     pub fn new() -> Self {
         Self {
-            shared: Arc::new(Mutex::new(HostShared::default())),
-            running: Arc::new(AtomicBool::new(true)),
-            started: Arc::new(AtomicBool::new(false)),
-            wake: Arc::new((Mutex::new(()), Condvar::new())),
+            inner: Arc::new(Inner {
+                shared: Arc::new(Mutex::new(HostShared::default())),
+                running: Arc::new(AtomicBool::new(true)),
+                started: AtomicBool::new(false),
+                wake: Arc::new((Mutex::new(()), Condvar::new())),
+            }),
         }
     }
 
     pub fn update(&self, host: isize, titlebar: f32, active: Option<isize>, hidden: Vec<isize>) {
         {
-            let mut s = self.shared.lock().unwrap_or_else(|e| e.into_inner());
+            let mut s = self.inner.shared.lock().unwrap_or_else(|e| e.into_inner());
             s.host = host;
             s.titlebar = titlebar.max(0.0);
             s.active = active;
             s.hidden = hidden;
         }
-        self.wake.1.notify_all();
+        self.inner.wake.1.notify_all();
     }
 
     pub fn start(&self) {
-        if self.started.swap(true, Ordering::SeqCst) {
+        if self.inner.started.swap(true, Ordering::SeqCst) {
             return;
         }
-        let shared = self.shared.clone();
-        let running = self.running.clone();
-        let wake = self.wake.clone();
+        let shared = self.inner.shared.clone();
+        let running = self.inner.running.clone();
+        let wake = self.inner.wake.clone();
         thread::spawn(move || {
             let mut last = WorkerState::default();
             while running.load(Ordering::Relaxed) {
@@ -109,8 +122,8 @@ impl HostWorker {
     }
 
     pub fn stop(&self) {
-        self.running.store(false, Ordering::Relaxed);
-        self.wake.1.notify_all();
+        self.inner.running.store(false, Ordering::Relaxed);
+        self.inner.wake.1.notify_all();
     }
 
     pub fn install_move_tracker(&self, host: isize) {
@@ -127,14 +140,8 @@ impl HostWorker {
                 return;
             }
             TRACKER_ORIG.with(|o| o.set(orig));
-            TRACKER.with(|t| *t.borrow_mut() = Some(self.shared.clone()));
+            TRACKER.with(|t| *t.borrow_mut() = Some(self.inner.shared.clone()));
         }
-    }
-}
-
-impl Drop for HostWorker {
-    fn drop(&mut self) {
-        self.stop();
     }
 }
 
@@ -243,11 +250,11 @@ fn apply(mut s: Snapshot, last: &mut WorkerState) {
                     }
                     if last.settle > 0 {
                         last.settle -= 1;
-                        place_member(active, rect, inset, true, false);
+                        let posted = IsHungAppWindow(active).as_bool();
+                        place_member(active, rect, inset, true, posted);
                     }
                 }
-                // Show only after placing, so a freshly added or switched-to
-                // member never flashes at its old desktop spot.
+                // Show only after placing, so a member never flashes at its old desktop spot.
                 if need_show {
                     let _ = ShowWindow(active, SW_SHOWNA);
                 }

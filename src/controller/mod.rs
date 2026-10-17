@@ -14,7 +14,7 @@ pub use dto::{
 };
 
 use ely_gpui_component::feedback::Toaster;
-use gpui::{AppContext, Context, Entity, RenderImage};
+use gpui::{AppContext, Context, Entity, RenderImage, SharedString};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -80,6 +80,17 @@ struct Index {
     generation: u64,
     by_hwnd: HashMap<isize, (GroupId, TabId)>,
     by_tab: HashMap<(GroupId, TabId), isize>,
+}
+
+fn saved_detail(count: usize, available: usize) -> SharedString {
+    let closed = count.saturating_sub(available);
+    if closed == 0 {
+        SharedString::from(format!("{available} available"))
+    } else if available == 0 {
+        SharedString::from(format!("{closed} closed"))
+    } else {
+        SharedString::from(format!("{available} available \u{00b7} {closed} closed"))
+    }
 }
 
 impl Controller {
@@ -155,7 +166,6 @@ impl Controller {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
-        self.invalidate_info();
         let mut changed = self.drain_events();
         let shortcuts = self
             .shortcuts
@@ -167,6 +177,7 @@ impl Controller {
         }
         self.pump_drag();
         if changed {
+            self.invalidate_info();
             self.sync_worker();
             cx.notify();
         }
@@ -187,6 +198,21 @@ impl Controller {
 
     fn build_host_info(&self) -> HostInfo {
         let group = self.active_group.and_then(|id| self.groups.group(id));
+        let caption = match group.map(|g| g.tabs.len()).unwrap_or(0) {
+            0 => SharedString::from("No windows yet"),
+            1 => SharedString::from("1 window open"),
+            n => SharedString::from(format!("{n} windows open")),
+        };
+        let version_label =
+            SharedString::from(format!("Slate v{}", crate::core::update::CURRENT_VERSION));
+        let update_label = match &self.update {
+            UpdateState::Checking => SharedString::from("Checking for updates\u{2026}"),
+            UpdateState::Available(version) => {
+                SharedString::from(format!("Update available: v{version}"))
+            }
+            UpdateState::UpToDate => SharedString::from("Slate is up to date"),
+            UpdateState::Idle | UpdateState::Failed => SharedString::from("Check for updates"),
+        };
         HostInfo {
             group: group.map(|g| g.id),
             tabs: group
@@ -221,11 +247,14 @@ impl Controller {
             saved_sets: self
                 .saved_sets
                 .iter()
-                .map(|s| SavedSetInfo {
-                    id: s.id,
-                    name: s.name.clone(),
-                    count: s.tabs.len(),
-                    available: self.saved_avail.get(&s.id).copied().unwrap_or(0),
+                .map(|s| {
+                    let available = self.saved_avail.get(&s.id).copied().unwrap_or(0);
+                    SavedSetInfo {
+                        id: s.id,
+                        name: s.name.clone(),
+                        available,
+                        detail: saved_detail(s.tabs.len(), available),
+                    }
                 })
                 .collect(),
             saved_prompt: self.saved_prompt,
@@ -235,7 +264,9 @@ impl Controller {
             hover_preview: self.hover_preview.clone(),
             show_tab_bar: self.settings.tabs.show_bar,
             update: self.update.clone(),
-            version: crate::core::update::CURRENT_VERSION,
+            caption,
+            version_label,
+            update_label,
         }
     }
 
@@ -271,42 +302,58 @@ impl Controller {
         self.worker.stop();
     }
 
+    fn reconcile_active_group(&mut self) {
+        self.groups.remove_empty();
+        let valid = self
+            .active_group
+            .is_some_and(|id| self.groups.group(id).is_some());
+        if !valid {
+            self.active_group = self.groups.groups().first().map(|g| g.id);
+        }
+    }
+
     fn active_hwnd(&self, group: GroupId) -> Option<isize> {
         let g = self.groups.group(group)?;
         let tab = g.active?;
         self.hwnd_of_tab(group, tab)
     }
 
-    fn index(&self) -> std::cell::Ref<'_, Index> {
-        let mut cache = self.index_cache.borrow_mut();
-        let stale = cache
+    fn ensure_index(&self) {
+        let generation = self.groups.generation();
+        if self
+            .index_cache
+            .borrow()
             .as_ref()
-            .map(|i| i.generation != self.groups.generation())
-            .unwrap_or(true);
-        if stale {
-            let mut index = Index {
-                generation: self.groups.generation(),
-                ..Default::default()
-            };
-            for group in self.groups.groups() {
-                for tab in &group.tabs {
-                    index.by_hwnd.insert(tab.window.hwnd, (group.id, tab.id));
-                    index.by_tab.insert((group.id, tab.id), tab.window.hwnd);
-                }
-            }
-            *cache = Some(index);
+            .is_some_and(|index| index.generation == generation)
+        {
+            return;
         }
-        drop(cache);
-        std::cell::Ref::map(self.index_cache.borrow(), |c| {
-            c.as_ref().expect("index cache populated")
-        })
+        let mut index = Index {
+            generation,
+            ..Default::default()
+        };
+        for group in self.groups.groups() {
+            for tab in &group.tabs {
+                index.by_hwnd.insert(tab.window.hwnd, (group.id, tab.id));
+                index.by_tab.insert((group.id, tab.id), tab.window.hwnd);
+            }
+        }
+        *self.index_cache.borrow_mut() = Some(index);
     }
 
     fn hwnd_of_tab(&self, group: GroupId, tab: TabId) -> Option<isize> {
-        self.index().by_tab.get(&(group, tab)).copied()
+        self.ensure_index();
+        self.index_cache
+            .borrow()
+            .as_ref()
+            .and_then(|index| index.by_tab.get(&(group, tab)).copied())
     }
 
     fn tab_of_hwnd(&self, hwnd: isize) -> Option<(GroupId, TabId)> {
-        self.index().by_hwnd.get(&hwnd).copied()
+        self.ensure_index();
+        self.index_cache
+            .borrow()
+            .as_ref()
+            .and_then(|index| index.by_hwnd.get(&hwnd).copied())
     }
 }

@@ -4,7 +4,7 @@
 
 # Slate
 
-**Universal window tabs for Windows.** Bring any app's window into one tabbed window.
+**Real tabs for Windows.** Turn any app's window into a tab, in one window.
 
 [![CI](https://github.com/burntfern/slate/actions/workflows/ci.yml/badge.svg)](https://github.com/burntfern/slate/actions/workflows/ci.yml)
 [![Release](https://github.com/burntfern/slate/actions/workflows/release-please.yml/badge.svg)](https://github.com/burntfern/slate/actions/workflows/release-please.yml)
@@ -78,7 +78,7 @@ Slate stores everything under `%USERPROFILE%\.burntfern`:
 - `config.json` — theme and accent
 - `slate\settings.json` — tab, preview, and shortcut settings
 - `slate\sets.json` — saved tab sets
-- `slate\logs\` and `slate\backups\` — rotated logs and config backups
+- `slate\backups\` — timestamped config backups
 
 On first run each file is seeded from the `configs\` folder that ships next to
 the executable (or the working directory in a dev checkout). Deleting these

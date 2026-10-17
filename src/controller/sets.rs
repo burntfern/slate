@@ -111,6 +111,6 @@ impl Controller {
             schema_version: config::SCHEMA_VERSION,
             sets: self.saved_sets.clone(),
         };
-        config::save_sets(&sets);
+        let _ = config::save_sets(&sets);
     }
 }

@@ -1,25 +1,55 @@
+use std::fs::File;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::load::{app_dir, sets_path, settings_path};
-use super::schema::{SavedSets, Settings};
+use serde_json::{json, Value};
 
-pub fn save(settings: &Settings) {
-    let _ = std::fs::create_dir_all(app_dir());
-    let Ok(mut json) = serde_json::to_string_pretty(settings) else {
-        return;
-    };
-    json.push('\n');
-    atomic_write(&settings_path(), json.as_bytes());
+use super::load::{app_dir, sets_path, settings_path, shared_config_path};
+use super::schema::{AppSettings, SavedSets, Settings, SCHEMA_VERSION};
+
+pub(crate) fn app_value(settings: &Settings) -> Value {
+    serde_json::to_value(AppSettings {
+        schema_version: SCHEMA_VERSION,
+        tabs: &settings.tabs,
+        updates: &settings.updates,
+    })
+    .unwrap_or_else(|_| json!({ "schema_version": SCHEMA_VERSION }))
 }
 
-pub fn save_sets(sets: &SavedSets) {
-    let _ = std::fs::create_dir_all(app_dir());
-    let Ok(mut json) = serde_json::to_string_pretty(sets) else {
-        return;
-    };
-    json.push('\n');
-    atomic_write(&sets_path(), json.as_bytes());
+pub fn save(settings: &Settings) -> io::Result<()> {
+    std::fs::create_dir_all(app_dir())?;
+    let value = app_value(settings);
+    let mut text = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
+    text.push('\n');
+    atomic_write(&settings_path(), text.as_bytes())
+}
+
+pub fn save_sets(sets: &SavedSets) -> io::Result<()> {
+    std::fs::create_dir_all(app_dir())?;
+    let mut text = serde_json::to_string_pretty(sets).map_err(io::Error::other)?;
+    text.push('\n');
+    atomic_write(&sets_path(), text.as_bytes())
+}
+
+pub fn save_theme(theme: &str, accent: &str) -> io::Result<()> {
+    let path = shared_config_path();
+    let mut value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        object.insert("schema_version".into(), json!(SCHEMA_VERSION));
+        object.insert("theme".into(), json!(theme));
+        object.insert("accent".into(), json!(accent));
+    }
+    let mut text = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
+    text.push('\n');
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    atomic_write(&path, text.as_bytes())
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
@@ -32,21 +62,22 @@ fn temp_path_for(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()))
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> bool {
+fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = temp_path_for(path);
-    let flushed = (|| -> std::io::Result<()> {
-        use std::io::Write;
-        let mut file = std::fs::File::create(&tmp)?;
+    let written = (|| -> io::Result<()> {
+        let mut file = File::create(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()
     })();
-    if flushed.is_err() {
+    if let Err(err) = written {
         let _ = std::fs::remove_file(&tmp);
-        return false;
+        return Err(err);
     }
-    if std::fs::rename(&tmp, path).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return false;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(err)
+        }
     }
-    true
 }

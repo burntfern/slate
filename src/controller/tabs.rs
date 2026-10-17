@@ -39,6 +39,7 @@ impl Controller {
             self.groups.set_active(group, tab);
             self.activate_member(hwnd);
         }
+        self.reconcile_active_group();
     }
 
     pub(super) fn select_tab(&mut self, group: GroupId, tab: TabId) {
@@ -106,6 +107,7 @@ impl Controller {
         self.rename_overrides.remove(&hwnd);
         self.tab_colors.remove(&hwnd);
         self.groups.remove_tab(group, tab);
+        self.reconcile_active_group();
     }
 
     pub(super) fn detach_tab_out(&mut self, from: usize, screen_x: f32, screen_y: f32) {
@@ -158,9 +160,6 @@ impl Controller {
         let Some(hwnd) = self.hwnd_of_tab(group, tab) else {
             return;
         };
-        if let Some(state) = self.styling.remove(&hwnd) {
-            unregister_member(hwnd, &state);
-        }
         close_window(hwnd);
     }
 

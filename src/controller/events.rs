@@ -27,7 +27,9 @@ impl Controller {
                 }
                 WinEvent::MoveStarted(hwnd) => {
                     if Some(hwnd) != self.host_hwnd && !self.styling.contains_key(&hwnd) {
-                        self.windows = enumerate_windows();
+                        if !self.windows.iter().any(|w| w.hwnd == hwnd) {
+                            self.windows = enumerate_windows();
+                        }
                         if self.trackable_drag(hwnd) {
                             self.drag = Some(hwnd);
                             self.drag_active = false;
@@ -63,6 +65,7 @@ impl Controller {
         }
         self.windows.retain(|w| w.hwnd != hwnd);
         self.groups.window_destroyed(hwnd);
+        self.reconcile_active_group();
         if self.picker_open {
             self.refresh_picker();
         }

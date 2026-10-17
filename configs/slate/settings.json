@@ -1,11 +1,13 @@
 {
   "schema_version": 1,
-  "theme": "system",
-  "accent": "blue",
   "tabs": {
     "icons": true,
     "count_badge": true,
     "hover_preview": true,
     "show_bar": true
+  },
+  "updates": {
+    "latest": null,
+    "checked_at": 0
   }
 }

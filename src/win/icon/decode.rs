@@ -15,7 +15,7 @@ use super::{ICON_BIG, ICON_SMALL, ICON_SMALL2, SMTO_ABORTIFHUNG};
 pub struct IconPixels {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    pub bgra: Vec<u8>,
 }
 
 pub fn window_icon(hwnd: isize) -> Option<IconPixels> {
@@ -89,13 +89,13 @@ unsafe fn decode(color: HBITMAP, mask: HBITMAP) -> Option<IconPixels> {
 
     let screen = GetDC(None);
     let mem = CreateCompatibleDC(Some(screen));
-    let Some(mut rgba) = dibits(mem, color, width, height) else {
+    let Some(mut bgra) = dibits(mem, color, width, height) else {
         let _ = DeleteDC(mem);
         let _ = ReleaseDC(None, screen);
         return None;
     };
     let mut alpha_present = false;
-    for p in rgba.chunks(4) {
+    for p in bgra.chunks(4) {
         if p[3] != 0 {
             alpha_present = true;
             break;
@@ -103,24 +103,21 @@ unsafe fn decode(color: HBITMAP, mask: HBITMAP) -> Option<IconPixels> {
     }
     if !alpha_present {
         if let Some(mask_buf) = dibits(mem, mask, width, height) {
-            for (px, m) in rgba.chunks_mut(4).zip(mask_buf.chunks(4)) {
+            for (px, m) in bgra.chunks_mut(4).zip(mask_buf.chunks(4)) {
                 px[3] = 255u8.wrapping_sub(m[0].max(m[1]).max(m[2]));
             }
         } else {
-            for px in rgba.chunks_mut(4) {
+            for px in bgra.chunks_mut(4) {
                 px[3] = 255;
             }
         }
     }
     let _ = DeleteDC(mem);
     let _ = ReleaseDC(None, screen);
-    for px in rgba.chunks_mut(4) {
-        px.swap(0, 2);
-    }
     Some(IconPixels {
         width,
         height,
-        rgba,
+        bgra,
     })
 }
 

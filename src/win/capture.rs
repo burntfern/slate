@@ -13,7 +13,7 @@ const MAX_W: i32 = 512;
 pub struct WindowSnapshot {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    pub bgra: Vec<u8>,
 }
 
 pub fn capture_window(hwnd: isize) -> Option<WindowSnapshot> {
@@ -74,6 +74,9 @@ unsafe fn grab(hwnd: isize) -> Option<WindowSnapshot> {
     let th = ((hgt as f32 * tw as f32 / w as f32).round() as i32).max(1);
 
     let screen = ScreenDc(GetDC(None));
+    if screen.0.is_invalid() {
+        return None;
+    }
     let cached = POOL.with(|p| {
         let mut slot = p.borrow_mut();
         match slot.as_ref() {
@@ -88,6 +91,9 @@ unsafe fn grab(hwnd: isize) -> Option<WindowSnapshot> {
         Some(p) => p,
         None => {
             let mem = MemDc(CreateCompatibleDC(Some(screen.0)));
+            if mem.0.is_invalid() {
+                return None;
+            }
             let bmp = Bitmap(CreateCompatibleBitmap(screen.0, tw, th));
             if bmp.0.is_invalid() {
                 return None;
@@ -117,16 +123,17 @@ unsafe fn grab(hwnd: isize) -> Option<WindowSnapshot> {
         SRCCOPY,
     )
     .as_bool();
-    let rgba = drawn
+    // Deselect before GetDIBits: it fails on a bitmap still selected into a DC.
+    SelectObject(pooled.mem.0, old);
+    let bgra = drawn
         .then(|| read_pixels(pooled.mem.0, pooled.bmp.0, tw, th))
         .flatten();
-    SelectObject(pooled.mem.0, old);
     POOL.with(|p| *p.borrow_mut() = Some(pooled));
 
     Some(WindowSnapshot {
         width: tw as u32,
         height: th as u32,
-        rgba: rgba?,
+        bgra: bgra?,
     })
 }
 
@@ -157,9 +164,7 @@ unsafe fn read_pixels(mem: HDC, bmp: HBITMAP, width: i32, height: i32) -> Option
     }
     let (chunks, _) = buf.as_chunks_mut::<4>();
     for px in chunks {
-        let v = u32::from_le_bytes(*px);
-        let out = 0xFF00_0000 | ((v & 0x0000_00FF) << 16) | (v & 0x0000_FF00) | ((v >> 16) & 0xFF);
-        *px = out.to_le_bytes();
+        px[3] = 0xFF;
     }
     Some(buf)
 }

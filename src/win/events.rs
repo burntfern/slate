@@ -1,16 +1,14 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_FOREGROUND,
-    EVENT_SYSTEM_MOVESIZEEND, EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT,
-    WINEVENT_SKIPOWNPROCESS,
+    EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE, EVENT_SYSTEM_MOVESIZEEND,
+    EVENT_SYSTEM_MOVESIZESTART, OBJID_WINDOW, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinEvent {
     Destroyed(isize),
     TitleChanged(isize),
-    ForegroundChanged(isize),
     MoveStarted(isize),
     MoveEnded(isize),
 }
@@ -37,7 +35,6 @@ unsafe extern "system" fn hook_proc(
     let e = match event {
         EVENT_OBJECT_DESTROY => WinEvent::Destroyed(hwnd.0 as isize),
         EVENT_OBJECT_NAMECHANGE => WinEvent::TitleChanged(hwnd.0 as isize),
-        EVENT_SYSTEM_FOREGROUND => WinEvent::ForegroundChanged(hwnd.0 as isize),
         EVENT_SYSTEM_MOVESIZESTART => WinEvent::MoveStarted(hwnd.0 as isize),
         EVENT_SYSTEM_MOVESIZEEND => WinEvent::MoveEnded(hwnd.0 as isize),
         _ => return,
@@ -87,18 +84,6 @@ impl WinEventPump {
             );
             if !move_end.0.is_null() {
                 hooks.push(move_end);
-            }
-            let fg = SetWinEventHook(
-                EVENT_SYSTEM_FOREGROUND,
-                EVENT_SYSTEM_FOREGROUND,
-                None,
-                Some(hook_proc),
-                0,
-                0,
-                flags,
-            );
-            if !fg.0.is_null() {
-                hooks.push(fg);
             }
         }
         Some(Self { hooks })
