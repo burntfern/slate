@@ -16,7 +16,7 @@ jobs:
       # action creates to trigger release.yml; events raised by the default
       # GITHUB_TOKEN do not start further workflow runs. Falls back to
       # GITHUB_TOKEN so the PR flow still works without the secret.
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
