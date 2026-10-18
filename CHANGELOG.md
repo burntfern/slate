@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/divyanshudhruv/slate/compare/v0.2.1...v0.3.0) (2026-10-18)
+
+
+### Features
+
+* **update:** add install record, bootstrap, and self-update on launch ([a92e158](https://github.com/divyanshudhruv/slate/commit/a92e1580ca503a45e8a9e7c07e2e3f2dda581411))
+
+
+### Bug Fixes
+
+* **app:** re-apply host geometry on drift and hide the janitor console ([12b92d5](https://github.com/divyanshudhruv/slate/commit/12b92d5c8a1b6bb70539d92ccd5e0c37c028a8e9))
+
 ## [0.2.1](https://github.com/divyanshudhruv/slate/compare/v0.2.0...v0.2.1) (2026-10-18)
 
 
