@@ -70,8 +70,8 @@ jobs:
             "$((Get-FileHash "$name.exe" -Algorithm SHA256).Hash.ToLower())  $name.exe"
           }
           $lines | Out-File -Encoding ascii SHA256SUMS
-          "$env:BIN-$tag-x64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
-          "$env:BIN-$tag-arm64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "asset_name=$env:BIN-$tag-x64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          "asset_name_arm64=$env:BIN-$tag-arm64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
 
       - name: Upload to release
         if: github.event_name == 'release'
