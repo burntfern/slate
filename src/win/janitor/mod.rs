@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{CloseHandle, HWND, WAIT_EVENT};
 use windows::Win32::System::Threading::{
-    OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, INFINITE, PROCESS_SYNCHRONIZE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, IsWindow, ShowWindow, GWL_HWNDPARENT, SW_HIDE,
@@ -12,8 +12,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::host::{unregister_member, StylingState};
 pub use wire::{decode, encode};
-
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Default)]
 pub struct Janitor {
@@ -68,7 +66,7 @@ pub fn spawn(path: &Path) {
         .arg("--janitor")
         .arg(path)
         .arg(std::process::id().to_string())
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW.0)
         .spawn();
 }
 
@@ -105,7 +103,6 @@ fn parse_state_name(name: &str) -> Option<u32> {
 }
 
 pub fn process_alive(pid: u32) -> bool {
-    // ERROR_INVALID_PARAMETER (87) means the pid is gone; any other error (e.g. access denied for an elevated process) counts as alive.
     const ERROR_INVALID_PARAMETER_LOW: u32 = 87;
     unsafe {
         match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
