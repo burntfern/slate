@@ -18,7 +18,6 @@ use super::HostCtx;
 use crate::controller::{Cmd, Controller, PickerRow, SavedSetInfo, TabInfo};
 use crate::core::{GroupId, TabId};
 
-/// Accent swatch bar heights (resting / selected).
 const SWATCH_H: f32 = 4.0;
 const SWATCH_H_ACTIVE: f32 = 7.0;
 const BADGE_SIZE: f32 = 11.0;

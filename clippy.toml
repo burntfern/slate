@@ -1,2 +1,0 @@
-# No custom lint thresholds yet. Kept so project-wide clippy settings have a
-# single home. Add keys here only if the default lint set proves too noisy.

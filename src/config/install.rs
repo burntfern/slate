@@ -4,8 +4,16 @@ use super::load::app_dir;
 use super::save::atomic_write;
 use super::schema::InstallRecord;
 
+pub fn slate_dir() -> PathBuf {
+    app_dir()
+}
+
+pub fn canonical_exe_path() -> PathBuf {
+    slate_dir().join(crate::core::install::CANONICAL_NAME)
+}
+
 pub fn install_path() -> PathBuf {
-    app_dir().join("install.json")
+    slate_dir().join("install.json")
 }
 
 pub fn load_install() -> Option<InstallRecord> {
@@ -14,6 +22,10 @@ pub fn load_install() -> Option<InstallRecord> {
 
 pub fn save_install(record: &InstallRecord) -> bool {
     write_install(&install_path(), record)
+}
+
+pub fn staging_updates_dir() -> PathBuf {
+    slate_dir().join("updates")
 }
 
 fn read_install(path: &Path) -> Option<InstallRecord> {
@@ -43,8 +55,40 @@ mod tests {
     }
 
     #[test]
+    fn canonical_exe_sits_inside_the_slate_dir() {
+        let dir = scratch("layout");
+        let _ = std::fs::create_dir_all(&dir);
+        let record = InstallRecord {
+            path: "C:\\apps\\slate.exe".into(),
+            version: "0.1.1".into(),
+            pid: 99,
+        };
+        assert!(write_install(&dir.join("install.json"), &record));
+        assert_eq!(
+            canonical_exe_path().parent().and_then(|p| p.file_name()),
+            Some(std::ffi::OsStr::new("slate"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_slate_dir_is_the_folder_the_menu_opens() {
+        let dir = slate_dir();
+        assert_eq!(dir.file_name().and_then(|n| n.to_str()), Some("slate"));
+        assert_eq!(
+            dir.parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str()),
+            Some(".burntfern")
+        );
+        assert_eq!(canonical_exe_path().parent(), Some(dir.as_path()));
+        assert_eq!(install_path().parent(), Some(dir.as_path()));
+        assert_eq!(staging_updates_dir().parent(), Some(dir.as_path()));
+    }
+
+    #[test]
     fn missing_file_reads_as_no_record() {
-        assert_eq!(read_install(&scratch("absent.json")), None);
+        assert_eq!(read_install(&scratch("missing.json")), None);
     }
 
     #[test]
@@ -57,7 +101,7 @@ mod tests {
         };
         assert!(write_install(&path, &record));
         assert_eq!(read_install(&path), Some(record));
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

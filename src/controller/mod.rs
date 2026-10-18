@@ -24,9 +24,10 @@ use self::dto::app_name;
 use crate::config;
 use crate::core::{GroupId, GroupSet, TabId, UpdateState, WindowIdentity};
 use crate::win::{
-    activate_window, enumerate_windows, unregister_member, Highlight, HostWorker, Janitor,
-    KeyboardCapture, ShortcutCapture, StylingState, WinEventPump,
+    activate_process, activate_window, enumerate_windows, unregister_member, Highlight, HostWorker,
+    Janitor, KeyboardCapture, ShortcutCapture, StylingState, WinEventPump,
 };
+use std::os::windows::process::CommandExt;
 
 pub(super) const PREVIEW_OPEN_MS: u64 = 500;
 pub(super) const PREVIEW_LINGER_MS: u64 = 200;
@@ -70,8 +71,6 @@ pub struct Controller {
     drag: Option<isize>,
     drag_active: bool,
     update: UpdateState,
-    updating: bool,
-    stale_copy: Option<(String, String)>,
     info_cache: RefCell<Option<Arc<HostInfo>>>,
     index_cache: RefCell<Option<Index>>,
     _pump: Option<WinEventPump>,
@@ -98,9 +97,7 @@ fn saved_detail(count: usize, available: usize) -> SharedString {
 impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
         config::ensure();
-        // One live copy per machine state; may quit right here if another
-        // copy already runs, and remembers an older leftover to offer later.
-        let stale_copy = update::startup_install();
+        Self::execute_startup_plan(update::startup_install());
         let toaster = cx.new(|_| Toaster::default());
         let settings = config::load();
         let update = UpdateState::from_cached(
@@ -145,8 +142,6 @@ impl Controller {
             drag: None,
             drag_active: false,
             update,
-            updating: false,
-            stale_copy,
             info_cache: RefCell::new(None),
             index_cache: RefCell::new(None),
             _pump: WinEventPump::install(),
@@ -155,6 +150,56 @@ impl Controller {
         Self::start_event_pump(cx);
         controller.apply_theme(cx);
         controller
+    }
+
+    fn execute_startup_plan(plan: crate::core::install::Plan) {
+        match plan {
+            crate::core::install::Plan::Dev => {}
+            crate::core::install::Plan::Run { exe, canonical } => {
+                config::save_install(&config::InstallRecord {
+                    path: exe,
+                    version: crate::core::update::CURRENT_VERSION.to_string(),
+                    pid: std::process::id(),
+                });
+                if canonical {
+                    let _ = std::fs::remove_file(crate::core::install::backup_path(
+                        &config::canonical_exe_path(),
+                    ));
+                }
+            }
+            crate::core::install::Plan::FocusRunning { pid } => {
+                if activate_process(pid) {
+                    crate::win::shell::info_message(
+                        "Slate is already running",
+                        "Switching to the open window.",
+                    );
+                }
+                std::process::exit(0);
+            }
+            crate::core::install::Plan::Bootstrap { source } => {
+                if let Err(err) = crate::win::update::bootstrap(&source) {
+                    crate::win::shell::info_message("First-run bootstrap failed", &err);
+                    std::process::exit(1);
+                }
+                let _ = std::process::Command::new(config::canonical_exe_path())
+                    .creation_flags(0)
+                    .spawn();
+                std::process::exit(0);
+            }
+            crate::core::install::Plan::Update { candidate } => {
+                if let Err(err) = crate::win::update::refresh_install_from(&candidate) {
+                    crate::win::shell::info_message("Update from downloaded release failed", &err);
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
+            crate::core::install::Plan::Defer { canonical } => {
+                let _ = std::process::Command::new(&canonical)
+                    .creation_flags(0)
+                    .spawn();
+                std::process::exit(0);
+            }
+        }
     }
 
     fn start_event_pump(cx: &mut Context<Self>) {

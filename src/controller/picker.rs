@@ -7,7 +7,6 @@ impl Controller {
     pub(super) fn set_picker_open(&mut self, open: bool) {
         if open {
             self.close_other_dropdowns();
-            // Re-scan so windows opened since the last scan show up without a manual refresh.
             self.windows = enumerate_windows();
             self.refresh_picker();
         }

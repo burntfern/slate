@@ -16,9 +16,6 @@
 </div>
 <br>
 
-> [!IMPORTANT]
-> **Slate is free, local, and open source.** It only rearranges windows that are already on your desktop - no app is ever launched for you, nothing is reparented into another process, and your settings stay in `%USERPROFILE%\.burntfern`.
-
 > [!WARNING]
 > **Slate is under active development.** Expect bugs and rough edges, and please [open an issue](https://github.com/divyanshudhruv/slate/issues) if something breaks.
 
@@ -38,15 +35,23 @@
 
 ## Features
 
-- **`Any window as a tab`** - add one from the `+` picker, Ctrl-drag a window onto the host, or hover it in pick mode and press `TAB`
-- **`Drag out to detach`** - drag a tab off the strip to send its window back to the desktop at the drop point, across monitors
-- **`Per-tab accents`** - color-code tabs by hue from the tab menu (session only)
-- **`Saved sets`** - snapshot the open tabs as a named set and restore it later; restoring only re-hosts windows that are already running
-- **`Hover preview`** - rest on a tab for a live snapshot of its window
-- **`Global shortcuts`** - `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`, `Ctrl`+`1..9` and `Ctrl`+`W` keep working while a hosted window has focus
-- **`Tray icon`** - restore the host or exit from the notification area
-- **`Self-updating`** - when a new release is out, the update prompt downloads it, swaps it over the exe wherever you put it, and restarts Slate; a stray older copy is spotted and brought up to date in place, so pins and shortcuts keep working, and a second launch focuses the running window
-- **`Light and dark themes`** - following the system by default
+**`1`** **`Any window as a tab`** - add one from the `+` picker, Ctrl-drag a window onto the host, or hover it in pick mode and press `TAB`
+
+**`2`** **`Drag out to detach`** - drag a tab off the strip to send its window back to the desktop at the drop point, across monitors
+
+**`3`** **`Per-tab accents`** - color-code tabs by hue from the tab menu (session only)
+
+**`4`** **`Saved sets`** - snapshot the open tabs as a named set and restore it later; restoring only re-hosts windows that are already running
+
+**`5`** **`Hover preview`** - rest on a tab for a live snapshot of its window
+
+**`6`** **`Global shortcuts`** - `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`, `Ctrl`+`1..9` and `Ctrl`+`W` keep working while a hosted window has focus
+
+**`7`** **`Tray icon`** - restore the host or exit from the notification area
+
+**`8`** **`Self-updating`** - **Check for updates** tells you when a new release is out and links to the downloads page; install it by running the newer release asset, which Slate copies over the canonical `%USERPROFILE%\.burntfern\slate\slate.exe` and restarts from, keeping the exe it replaces beside it until a clean run so a failed swap can fall back to it
+
+**`9`** **`Light and dark themes`** - following the system by default
 
 ## Gallery
 
@@ -138,19 +143,14 @@
 
 ## Install
 
-Pick the asset that matches your CPU from the
-[latest release](https://github.com/divyanshudhruv/slate/releases/latest) and run it.
-Swap `X.Y.Z` for the version shown there. There is no installer and nothing
-else to install.
+Download the asset that matches your CPU from the
+[latest release](https://github.com/divyanshudhruv/slate/releases/latest) and run
+it. There is no installer and nothing else to install.
 
-| Asset                                       | For                                              |
-| ------------------------------------------- | ------------------------------------------------ |
-| `slate-vX.Y.Z-x64.exe`                      | Intel / AMD 64-bit PCs (most machines)           |
-| `slate-vX.Y.Z-arm64.exe`                    | ARM64 Windows (Surface, Snapdragon laptops)      |
-
-This page is only needed for the very first download: after that, updates
-install themselves - Slate offers an **Update now** prompt, replaces its own
-exe in place, and restarts.
+| Asset                    | For                                         |
+| ------------------------ | ------------------------------------------- |
+| `slate-vX.Y.Z-x64.exe`   | Intel / AMD 64-bit PCs (most machines)      |
+| `slate-vX.Y.Z-arm64.exe` | ARM64 Windows (Surface, Snapdragon laptops) |
 
 Releases are unsigned, so SmartScreen may warn on the first launch. To check a
 download, compare it against the published `SHA256SUMS`:
@@ -191,15 +191,16 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Slate stores everything under `%USERPROFILE%\.burntfern`:
 
-- `config.json` - theme and accent
-- `slate\settings.json` - tab, preview, and shortcut settings
-- `slate\sets.json` - saved tab sets
-- `slate\install.json` - the registered copy (path, version, pid) that powers in-app updates and the single-instance check
-- `slate\backups\` - timestamped config backups
-
-On first run each file is seeded from the `configs\` folder that ships next to
-the executable (or the working directory in a dev checkout). Deleting these
-files resets Slate to defaults.
+| File                   | What it holds                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `config.json`          | Theme and accent                                                                                  |
+| `slate\settings.json`  | Tab, preview, and shortcut settings                                                               |
+| `slate\sets.json`      | Saved tab sets                                                                                    |
+| `slate\install.json`   | The registered copy (path, version, pid) that powers updates and the single-instance check |
+| `slate\slate.exe`      | The canonical copy Slate installs as and updates in place                                         |
+| `slate\slate.exe.old`  | The previous exe, kept until a successful run, so a failed update can fall back to it             |
+| `slate\updates\`       | Downloaded releases and the swap helper, cleaned up as they are used                              |
+| `slate\backups\`       | Timestamped config backups                                                                        |
 
 ## Limitations
 

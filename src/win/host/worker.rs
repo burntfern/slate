@@ -4,11 +4,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GetForegroundWindow, GetWindowLongPtrW, IsHungAppWindow, IsIconic,
-    IsWindowVisible, SetWindowPos, ShowWindow, GWLP_WNDPROC, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNA, WM_MOVE, WM_SIZE, WM_WINDOWPOSCHANGED, WNDPROC,
+    CallWindowProcW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, IsHungAppWindow,
+    IsIconic, IsWindowVisible, SetWindowPos, ShowWindow, GWLP_WNDPROC, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNA, WM_MOVE, WM_SIZE,
+    WM_WINDOWPOSCHANGED, WNDPROC,
 };
 
 use super::geometry::{content_rect_screen, member_insets, place_member};
@@ -248,13 +249,22 @@ fn apply(mut s: Snapshot, last: &mut WorkerState) {
                         last.rect = Some(desired);
                         last.settle = SETTLE_PASSES;
                     }
+                    let posted = IsHungAppWindow(active).as_bool();
                     if last.settle > 0 {
                         last.settle -= 1;
-                        let posted = IsHungAppWindow(active).as_bool();
                         place_member(active, rect, inset, true, posted);
+                    } else if !IsIconic(active).as_bool() {
+                        let mut wr = RECT::default();
+                        let drifted = GetWindowRect(active, &mut wr).is_ok()
+                            && (wr.left != desired.0
+                                || wr.top != desired.1
+                                || wr.right - wr.left != desired.2
+                                || wr.bottom - wr.top != desired.3);
+                        if drifted {
+                            place_member(active, rect, inset, true, posted);
+                        }
                     }
                 }
-                // Show only after placing, so a member never flashes at its old desktop spot.
                 if need_show {
                     let _ = ShowWindow(active, SW_SHOWNA);
                 }

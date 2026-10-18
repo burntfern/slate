@@ -1,5 +1,5 @@
-use std::sync::mpsc::{self, Sender};
-use std::sync::OnceLock;
+use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::UI::Shell::ShellExecuteW;
@@ -7,40 +7,36 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, MB_ICONINFORMATION, MB_OK, SW_SHOWNORMAL,
 };
 
-// One long-lived worker opens URLs, so repeated clicks cannot spawn threads.
-fn sender() -> &'static Sender<String> {
-    static SENDER: OnceLock<Sender<String>> = OnceLock::new();
-    SENDER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<String>();
-        std::thread::spawn(move || {
-            for url in rx {
-                let wide: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
-                unsafe {
-                    // A return value <= 32 means failure; nothing actionable, so ignored.
-                    let _ = ShellExecuteW(
-                        None,
-                        w!("open"),
-                        PCWSTR(wide.as_ptr()),
-                        PCWSTR::null(),
-                        PCWSTR::null(),
-                        SW_SHOWNORMAL,
-                    );
-                }
-            }
-        });
-        tx
-    })
+fn shell_execute(verb: PCWSTR, target: &[u16]) {
+    unsafe {
+        let _ = ShellExecuteW(
+            None,
+            verb,
+            PCWSTR(target.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        );
+    }
 }
 
 pub fn open_url(url: &str) {
-    let _ = sender().send(url.to_owned());
+    let target: Vec<u16> = url.encode_utf16().chain(std::iter::once(0)).collect();
+    std::thread::spawn(move || shell_execute(w!("open"), &target));
 }
 
-/// Blocking, but only used when a second copy quits immediately at startup.
+pub fn open_folder(path: &Path) {
+    let target: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    std::thread::spawn(move || shell_execute(w!("explore"), &target));
+}
+
 pub fn info_message(title: &str, body: &str) {
-    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
-    let title = wide(title);
-    let body = wide(body);
+    let title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let body: Vec<u16> = body.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let _ = MessageBoxW(
             None,

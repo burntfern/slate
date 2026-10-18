@@ -66,7 +66,6 @@ pub fn register_member(host: isize, member: isize) -> Option<StylingState> {
         if IsIconic(mh).as_bool() || IsZoomed(mh).as_bool() {
             let _ = ShowWindow(mh, SW_RESTORE);
         }
-        // Stay hidden until the worker pins it, so it never flashes at its old desktop position.
         let _ = ShowWindow(mh, SW_HIDE);
         let _ = SetWindowPos(
             mh,
@@ -119,10 +118,8 @@ pub fn unregister_member(member: isize, st: &StylingState) {
         let minimized = IsIconic(mh).as_bool() || st.placement.showCmd as i32 == SW_SHOWMINIMIZED.0;
         let _ = ShowWindow(mh, SW_HIDE);
         let _ = SetWindowRgn(mh, None, true);
-        // Un-own first: an owned window has no taskbar button, so clicking its old spot does nothing.
         let _ = set_long_ptr(mh, GWL_HWNDPARENT, st.owner);
         let _ = set_long_ptr(mh, GWL_STYLE, st.style);
-        // The shell only rebuilds the taskbar button on a frame change, so bounce WS_EX_TOOLWINDOW synchronously (no ASYNC) after clearing the owner.
         let ex = GetWindowLongPtrW(mh, GWL_EXSTYLE);
         let _ = set_long_ptr(mh, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
         let _ = SetWindowPos(
@@ -140,7 +137,6 @@ pub fn unregister_member(member: isize, st: &StylingState) {
         let (l, t, r, b) = st.rect;
         let w = (r - l).max(0);
         let h = (b - t).max(0);
-        // Restore the rect, rebuild the frame with the final exstyle (taskbar button appears now), and raise above the host so it is clickable at once.
         let _ = SetWindowPos(
             mh,
             Some(HWND_TOP),
