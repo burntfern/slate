@@ -3,8 +3,6 @@ targets = [{ triple = "x86_64-pc-windows-msvc" }]
 
 [advisories]
 version = 2
-# Unmaintained-only, all pulled in transitively through gpui/ely, with no
-# upgrade available on our side. Revisit when upstream bumps these.
 ignore = [
     "RUSTSEC-2024-0436", # paste - unmaintained
     "RUSTSEC-2026-0206", # rustybuzz - unmaintained
@@ -36,8 +34,6 @@ allow = [
 
 [bans]
 multiple-versions = "warn"
-# The ely-gpui-component dependency is a git source pinned by rev, so it has no
-# version requirement; only path/wildcard surprises are worth failing on here.
 wildcards = "warn"
 
 [sources]

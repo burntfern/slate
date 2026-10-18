@@ -12,7 +12,7 @@ keywords = ["tabs", "windows", "window-manager", "gpui", "desktop"]
 categories = ["gui", "os::windows"]
 
 [dependencies]
-ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components" }
+ely-gpui-component = { git = "https://git.zacharyzhang.com/ZacharyZhang-NY/Ely-GPUI-Components", rev = "c35fdac2e35c300a5e25b36aa6163f1bc9dbaad4" }
 gpui = { package = "gpui-pre", version = "=0.3.8" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit"] }
 image = "0.25"
@@ -41,7 +41,5 @@ windows = { version = "0.62", features = [
 ] }
 
 [profile.dev]
-# Debug info is most of the target directory. Line tables keep backtraces
-# readable while cutting link time and disk use; CI pins the same value.
 debug = "line-tables-only"
 
