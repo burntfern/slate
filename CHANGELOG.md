@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/divyanshudhruv/slate/compare/v0.2.0...v0.2.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ci:** correct GitHub App token repository scope ([89e3a06](https://github.com/divyanshudhruv/slate/commit/89e3a06b1c2c03a53d1ca7dffd8d3cba5d913404))
+
 ## [0.2.0](https://github.com/burntfern/slate/compare/v0.1.0...v0.2.0) (2026-10-17)
 
 
