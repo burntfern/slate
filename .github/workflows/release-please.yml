@@ -12,12 +12,17 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      # A PAT (secret RELEASE_PLEASE_TOKEN) is required for the tag/release this
-      # action creates to trigger release.yml; events raised by the default
-      # GITHUB_TOKEN do not start further workflow runs. Falls back to
-      # GITHUB_TOKEN so the PR flow still works without the secret.
-      - uses: googleapis/release-please-action@v5
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@v2
+        id: app-token
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.repository }}
+
+      - name: Run Release Please
+        uses: googleapis/release-please-action@v5
+        with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

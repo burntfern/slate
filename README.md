@@ -6,10 +6,10 @@
 
 <div align="center">
 
-[![CI](https://img.shields.io/github/actions/workflow/status/burntfern/slate/ci.yml?label=ci&style=flat-square)](https://github.com/burntfern/slate/actions/workflows/ci.yml)
-[![Deny](https://img.shields.io/github/actions/workflow/status/burntfern/slate/deny.yml?label=deny&style=flat-square)](https://github.com/burntfern/slate/actions/workflows/deny.yml)
-[![Release](https://img.shields.io/github/v/release/burntfern/slate?sort=semver&style=flat-square)](https://github.com/burntfern/slate/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/burntfern/slate/total?style=flat-square)](https://github.com/burntfern/slate/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/divyanshudhruv/slate/ci.yml?label=ci&style=flat-square)](https://github.com/divyanshudhruv/slate/actions/workflows/ci.yml)
+[![Deny](https://img.shields.io/github/actions/workflow/status/divyanshudhruv/slate/deny.yml?label=deny&style=flat-square)](https://github.com/divyanshudhruv/slate/actions/workflows/deny.yml)
+[![Release](https://img.shields.io/github/v/release/divyanshudhruv/slate?sort=semver&style=flat-square)](https://github.com/divyanshudhruv/slate/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/divyanshudhruv/slate/total?style=flat-square)](https://github.com/divyanshudhruv/slate/releases)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg?style=flat-square)](LICENSE)
 
@@ -20,9 +20,10 @@
 > **Slate is free, local, and open source.** It only rearranges windows that are already on your desktop - no app is ever launched for you, nothing is reparented into another process, and your settings stay in `%USERPROFILE%\.burntfern`.
 
 > [!WARNING]
-> **Slate is under active development.** Expect bugs and rough edges, and please [open an issue](https://github.com/burntfern/slate/issues) if something breaks.
+> **Slate is under active development.** Expect bugs and rough edges, and please [open an issue](https://github.com/divyanshudhruv/slate/issues) if something breaks.
 
 > Built with **Rust** on **[gpui](https://github.com/zed-industries/zed)**.
+> Part of **[Burntfern](https://github.com/burntfern)**.
 
 ## Table of Contents
 
@@ -138,7 +139,7 @@
 ## Install
 
 Pick the asset that matches your CPU from the
-[latest release](https://github.com/burntfern/slate/releases/latest) and run it.
+[latest release](https://github.com/divyanshudhruv/slate/releases/latest) and run it.
 Swap `X.Y.Z` for the version shown there. There is no installer and nothing
 else to install.
 
@@ -216,4 +217,4 @@ running. It skips elevated windows unless Slate itself is elevated.
 
 GNU General Public License v3.0. See [LICENSE](LICENSE).
 
-Copyright (C) 2026 burntfern
+Copyright © 2026 Divyanshu Dhruv

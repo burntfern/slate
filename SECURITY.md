@@ -3,7 +3,7 @@
 ## Supported versions
 
 Slate ships as a portable binary from the
-[Releases](https://github.com/burntfern/slate/releases) page. Only the latest
+[Releases](https://github.com/divyanshudhruv/slate/releases) page. Only the latest
 release is supported. If you build from source, use the tip of `main`.
 
 ## Reporting a vulnerability

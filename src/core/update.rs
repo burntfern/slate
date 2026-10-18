@@ -1,6 +1,7 @@
-pub const REPOSITORY_URL: &str = "https://github.com/burntfern/slate";
-pub const RELEASES_URL: &str = "https://github.com/burntfern/slate/releases/latest";
-pub const LATEST_API_URL: &str = "https://api.github.com/repos/burntfern/slate/releases/latest";
+pub const REPOSITORY_URL: &str = "https://github.com/divyanshudhruv/slate";
+pub const RELEASES_URL: &str = "https://github.com/divyanshudhruv/slate/releases/latest";
+pub const LATEST_API_URL: &str =
+    "https://api.github.com/repos/divyanshudhruv/slate/releases/latest";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 // Throttle for repeated menu clicks; also keeps API calls rare.
 pub const CHECK_COOLDOWN_SECS: i64 = 5;
@@ -50,7 +51,9 @@ pub fn is_newer(current: &str, latest: &str) -> bool {
 
 /// Release assets follow `release.yml` naming: slate-v{tag}-{arch}.exe.
 pub fn download_url(tag: &str, arch: &str) -> String {
-    format!("https://github.com/burntfern/slate/releases/download/v{tag}/slate-v{tag}-{arch}.exe")
+    format!(
+        "https://github.com/divyanshudhruv/slate/releases/download/v{tag}/slate-v{tag}-{arch}.exe"
+    )
 }
 
 /// What launching Slate reveals about the registered-exe record
@@ -154,11 +157,11 @@ mod tests {
     fn download_url_matches_release_asset_names() {
         assert_eq!(
             download_url("0.2.0", "x64"),
-            "https://github.com/burntfern/slate/releases/download/v0.2.0/slate-v0.2.0-x64.exe"
+            "https://github.com/divyanshudhruv/slate/releases/download/v0.2.0/slate-v0.2.0-x64.exe"
         );
         assert_eq!(
             download_url("v0.2.0", "arm64"),
-            "https://github.com/burntfern/slate/releases/download/vv0.2.0/slate-vv0.2.0-arm64.exe"
+            "https://github.com/divyanshudhruv/slate/releases/download/vv0.2.0/slate-vv0.2.0-arm64.exe"
         );
     }
 
