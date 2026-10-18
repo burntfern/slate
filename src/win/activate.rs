@@ -10,8 +10,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_CLOSE,
 };
 
-/// Bring any visible top-level window of `pid` to the front; used when a
-/// second copy of Slate finds one already running.
 pub fn activate_process(pid: u32) -> bool {
     struct Search {
         pid: u32,

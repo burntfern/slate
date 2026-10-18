@@ -18,7 +18,6 @@ pub(super) fn grayscale_mark() -> Option<Arc<RenderImage>> {
     Some(crate::ui::render_image(rgba))
 }
 
-/// A single key cap, styled like the caps ely draws for shortcuts.
 pub(super) fn key_cap(label: impl Into<SharedString>, cx: &App) -> Div {
     let theme = cx.theme();
     div()

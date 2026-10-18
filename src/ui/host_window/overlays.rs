@@ -9,7 +9,6 @@ use gpui::{
 
 pub(super) type Action = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// Panel widths, shared by the panel and its overlay so the two cannot drift.
 pub(super) const MENU_W: f32 = 300.0;
 pub(super) const MENU_W_SAVED: f32 = 280.0;
 pub(super) const MENU_W_TAB_MENU: f32 = 260.0;
@@ -17,7 +16,6 @@ pub(super) const MENU_W_TAB_MENU: f32 = 260.0;
 const ROW_H: f32 = 30.0;
 const PANEL_PAD: f32 = 16.0;
 
-/// The surface every dropdown shares: fixed width, rounded, bordered, floating.
 pub(super) fn menu_panel(width: f32, cx: &App) -> Div {
     let theme = cx.theme();
     div()
@@ -33,7 +31,6 @@ pub(super) fn menu_panel(width: f32, cx: &App) -> Div {
         .shadow(theme.elevation(Elevation::Floating))
 }
 
-/// Estimated height of a `rows`-row menu, used only to place it inside the viewport (the panel is capped and scrolls independently).
 pub(super) fn menu_height(rows: usize) -> f32 {
     rows as f32 * ROW_H + PANEL_PAD
 }
