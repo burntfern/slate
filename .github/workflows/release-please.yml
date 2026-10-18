@@ -18,7 +18,6 @@ jobs:
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          repositories: ${{ github.repository }}
 
       - name: Run Release Please
         uses: googleapis/release-please-action@v5
