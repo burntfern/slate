@@ -114,6 +114,7 @@ pub enum Cmd {
     ToggleTabBar,
     OpenRepository,
     CheckForUpdates,
+    OpenSlateFolder,
 }
 
 #[derive(Clone)]
@@ -148,7 +149,6 @@ pub struct HostInfo {
     pub hover_preview: Option<HoverPreview>,
     pub show_tab_bar: bool,
     pub update: UpdateState,
-    /// Precomputed so the render pass does not build these strings every frame.
     pub caption: SharedString,
     pub version_label: SharedString,
     pub update_label: SharedString,
@@ -174,7 +174,6 @@ pub struct SavedSetInfo {
     pub id: u64,
     pub name: String,
     pub available: usize,
-    /// Precomputed availability summary for the row subtitle.
     pub detail: SharedString,
 }
 
@@ -223,13 +222,11 @@ pub(super) fn app_name(exe_name: &str) -> String {
 }
 
 pub(super) fn render_image(px: IconPixels) -> Option<Arc<RenderImage>> {
-    // gpui's RenderImage buffers are BGRA, so the DIB order is passed through unchanged.
     let buffer = image::RgbaImage::from_raw(px.width, px.height, px.bgra)?;
     Some(crate::ui::render_image(buffer))
 }
 
 pub(super) fn render_snapshot(snap: WindowSnapshot) -> Option<Arc<RenderImage>> {
-    // gpui's RenderImage buffers are BGRA, so the DIB order is passed through unchanged.
     let buffer = image::RgbaImage::from_raw(snap.width, snap.height, snap.bgra)?;
     Some(crate::ui::render_image(buffer))
 }

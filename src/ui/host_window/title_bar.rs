@@ -17,12 +17,9 @@ use crate::controller::{Cmd, Controller, HostInfo};
 use crate::core::update::UpdateState;
 use crate::ui::tab_bar::SlateTabBar;
 
-/// Width of each scroll fade over the tab strip.
 const FADE_W: f32 = 40.0;
-/// Update-available dot on the menu button.
 const UPDATE_DOT_SIZE: f32 = 8.0;
 const UPDATE_DOT_INSET: f32 = 4.0;
-/// Space reserved before the OS window controls.
 const CONTROLS_RESERVE_W: f32 = 64.0;
 
 pub(super) struct TitleBar {
@@ -99,7 +96,6 @@ pub(super) fn build(
     }
 }
 
-/// An action that dispatches `make()` and then clears the mirrored overlay flag.
 fn overlay_action(
     controller: &Entity<Controller>,
     make: impl Fn() -> Cmd + 'static,
@@ -183,6 +179,11 @@ fn app_menu(controller: &Entity<Controller>, info: &HostInfo) -> Menu {
                 .icon(IconName::ExternalLink)
                 .on_click(overlay_action(controller, || Cmd::OpenRepository)),
         )
+        .item(
+            MenuItem::new("Open Slate folder")
+                .icon(IconName::FolderOpen)
+                .on_click(overlay_action(controller, || Cmd::OpenSlateFolder)),
+        )
         .separator()
         .item(MenuItem::new(info.version_label.clone()).disabled(true))
         .item(MenuItem::new("Quit Slate").on_click(quit_action(controller)))
@@ -194,7 +195,6 @@ fn menu_trigger(
     success: gpui::Hsla,
 ) -> impl IntoElement {
     let (_, _, update_available) = update_state(&info.update);
-    // OverflowMenu owns its open state, so `info.overlay` mirrors it: the trigger toggles both and every menu action clears it.
     let menu = OverflowMenu::new("host-menu", app_menu(controller, info))
         .icon(if info.overlay {
             IconName::X

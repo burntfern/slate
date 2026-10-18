@@ -2,6 +2,7 @@ use gpui::Context;
 
 use super::dto::{Cmd, SavedPrompt, TabMenu};
 use super::Controller;
+use crate::config;
 use crate::win::{activate_window, enumerate_windows, install_window_icon};
 
 impl Controller {
@@ -19,8 +20,6 @@ impl Controller {
                 }
                 self.worker.start();
                 self.worker.install_move_tracker(hwnd);
-                // The window exists now, so a stale-copy prompt can show.
-                self.offer_stale_cleanup(cx);
             }
             Cmd::SelectTab { group, tab } => self.select_tab(group, tab),
             Cmd::Ungroup { group, tab } => {
@@ -111,6 +110,9 @@ impl Controller {
                 crate::win::shell::open_url(crate::core::update::REPOSITORY_URL);
             }
             Cmd::CheckForUpdates => self.check_for_updates(cx),
+            Cmd::OpenSlateFolder => {
+                crate::win::shell::open_folder(&config::slate_dir());
+            }
         }
         self.sync_worker();
         cx.notify();
