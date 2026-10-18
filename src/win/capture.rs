@@ -123,7 +123,6 @@ unsafe fn grab(hwnd: isize) -> Option<WindowSnapshot> {
         SRCCOPY,
     )
     .as_bool();
-    // Deselect before GetDIBits: it fails on a bitmap still selected into a DC.
     SelectObject(pooled.mem.0, old);
     let bgra = drawn
         .then(|| read_pixels(pooled.mem.0, pooled.bmp.0, tw, th))

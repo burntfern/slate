@@ -71,15 +71,10 @@ pub struct Updates {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallRecord {
-    /// Full path of the exe that last ran; the anchor for single-instance
-    /// and stale-copy detection.
     #[serde(default)]
     pub path: String,
-    /// Version of that exe, so a newer copy launched from elsewhere can spot
-    /// it as an older leftover.
     #[serde(default)]
     pub version: String,
-    /// Pid of that run; only meaningful while the process lives.
     #[serde(default)]
     pub pid: u32,
 }

@@ -26,10 +26,10 @@ running `slate.exe` before rebuilding - it holds the exe open.
 
 ## Layout
 
-- `src/core/` - pure state (groups, tabs, saved sets) with its tests
+- `src/core/` - pure state (groups, tabs, saved sets, install/update planning) with its tests
 - `src/config/` - load/save/schema for `%USERPROFILE%\.burntfern`, seeded from `configs/`
 - `src/controller/` - `Cmd` dispatch and the snapshot the UI renders; owns the win layer
-- `src/win/` - Win32: enumeration, hooks, host lifecycle, janitor, tray, icons, capture
+- `src/win/` - Win32: enumeration, hooks, host lifecycle, janitor, tray, icons, capture, self-update
 - `src/ui/` - gpui views: host window, tab bar, overlays and panels
 
 ## Rules

@@ -152,39 +152,12 @@ it. There is no installer and nothing else to install.
 | `slate-vX.Y.Z-x64.exe`   | Intel / AMD 64-bit PCs (most machines)      |
 | `slate-vX.Y.Z-arm64.exe` | ARM64 Windows (Surface, Snapdragon laptops) |
 
-**First launch** installs Slate. The exe you ran is copied to
-`%USERPROFILE%\.burntfern\slate\slate.exe` and Slate starts from that copy. Both
-files stay: the download is left where it is, and the canonical copy is the one
-Slate updates. Point a taskbar pin or shortcut at the canonical `slate.exe` so
-it keeps working across versions.
-
-**Updates** always land on that same canonical exe. The in-app check only
-tells you when a newer release exists and links to the downloads page; install
-it by running the newer release asset you downloaded yourself. The file is
-checked against the release's `SHA256SUMS` when the release publishes one, then
-staged under `%USERPROFILE%\.burntfern\slate\updates\`. Windows will not replace
-a running exe, so a small helper waits for Slate to exit, keeps the current exe
-as `slate.exe.old`, moves the new one into place, and starts it. If moving the
-new exe into place fails, the previous one goes back and your download is left
-untouched.
-
-The previous exe stays at `slate.exe.old` until a successful run from the
-canonical path removes it. To open that folder from inside Slate, the menu
-button in the host window has an **Open Slate folder** item.
-
-Slate keeps its own files under `%USERPROFILE%\.burntfern\slate\`. The shared
-`%USERPROFILE%\.burntfern\config.json` holds your theme and accent and is never
-touched by an install or update.
-
 Releases are unsigned, so SmartScreen may warn on the first launch. To check a
 download, compare it against the published `SHA256SUMS`:
 
 ```powershell
 Get-FileHash .\slate-vX.Y.Z-x64.exe -Algorithm SHA256  # match the file you downloaded
 ```
-
-This page is only needed for the very first download: after that, installing a
-newer release asset updates Slate in place.
 
 ## Build from source
 
@@ -228,11 +201,6 @@ Slate stores everything under `%USERPROFILE%\.burntfern`:
 | `slate\slate.exe.old`  | The previous exe, kept until a successful run, so a failed update can fall back to it             |
 | `slate\updates\`       | Downloaded releases and the swap helper, cleaned up as they are used                              |
 | `slate\backups\`       | Timestamped config backups                                                                        |
-
-On first run each file is seeded from the `configs\` folder in the source
-tree when it sits next to the executable (as in a dev checkout); packaged
-releases ship no `configs` folder and are seeded from the same defaults
-compiled into the binary. Deleting these files resets Slate to defaults.
 
 ## Limitations
 

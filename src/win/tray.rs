@@ -83,7 +83,6 @@ unsafe fn show_menu(hwnd: HWND) {
             None,
         );
         let _ = DestroyMenu(menu);
-        // Dismiss the menu if the user clicked away instead of choosing an item.
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
         match cmd.0 {
             CMD_SHOW => restore_host(),
