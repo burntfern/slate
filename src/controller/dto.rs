@@ -88,10 +88,6 @@ pub enum Cmd {
         id: u64,
         name: String,
     },
-    #[allow(dead_code)]
-    UpdateSet {
-        id: u64,
-    },
     RestoreSet {
         id: u64,
     },

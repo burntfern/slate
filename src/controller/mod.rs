@@ -83,8 +83,6 @@ struct Index {
     by_tab: HashMap<(GroupId, TabId), isize>,
 }
 
-
-
 impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
         config::ensure();

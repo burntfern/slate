@@ -92,8 +92,6 @@ impl Controller {
             Cmd::CancelSavedPrompt => self.saved_prompt = None,
             Cmd::CommitSaveSet { name } => self.commit_save_set(name),
             Cmd::CommitRenameSet { id, name } => self.commit_rename_set(id, name),
-            #[allow(deprecated)]
-            Cmd::UpdateSet { id } => self.update_set(id),
             Cmd::RestoreSet { id } => self.restore_set(id),
             Cmd::DeleteSet { id } => self.delete_set(id),
             Cmd::ToggleTabBadge => self.toggle_tab_badge(),

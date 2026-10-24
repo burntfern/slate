@@ -77,31 +77,6 @@ impl Controller {
         self.refresh_saved_avail();
     }
 
-    #[allow(dead_code)]
-    pub(super) fn update_set(&mut self, id: u64) {
-        let Some(group) = self.active_group.and_then(|gid| self.groups.group(gid)) else {
-            return;
-        };
-        let tabs: Vec<config::SavedTab> = group
-            .tabs
-            .iter()
-            .map(|t| config::SavedTab {
-                exe_path: t.window.exe_path.clone(),
-                exe_name: t.window.exe_name.clone(),
-                title_hint: t.window.title.clone(),
-                accent: self.tab_colors.get(&t.window.hwnd).copied(),
-            })
-            .collect();
-        if tabs.is_empty() {
-            return;
-        }
-        if let Some(set) = self.saved_sets.iter_mut().find(|s| s.id == id) {
-            set.tabs = tabs;
-            self.persist_sets();
-            self.refresh_saved_avail();
-        }
-    }
-
     pub(super) fn commit_rename_set(&mut self, id: u64, name: String) {
         self.saved_prompt = None;
         let name = name.trim().to_string();
