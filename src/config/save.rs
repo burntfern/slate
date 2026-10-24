@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{json, Value};
 
-use super::load::{app_dir, sets_path, settings_path, shared_config_path};
+use super::load::{sets_path, settings_path, shared_config_path};
+use super::paths;
 use super::schema::{AppSettings, SavedSets, Settings, SCHEMA_VERSION};
 
 pub(crate) fn app_value(settings: &Settings) -> Value {
@@ -18,7 +19,7 @@ pub(crate) fn app_value(settings: &Settings) -> Value {
 }
 
 pub fn save(settings: &Settings) -> io::Result<()> {
-    std::fs::create_dir_all(app_dir())?;
+    std::fs::create_dir_all(paths::data_dir())?;
     let value = app_value(settings);
     let mut text = serde_json::to_string_pretty(&value).map_err(io::Error::other)?;
     text.push('\n');
@@ -26,7 +27,7 @@ pub fn save(settings: &Settings) -> io::Result<()> {
 }
 
 pub fn save_sets(sets: &SavedSets) -> io::Result<()> {
-    std::fs::create_dir_all(app_dir())?;
+    std::fs::create_dir_all(paths::data_dir())?;
     let mut text = serde_json::to_string_pretty(sets).map_err(io::Error::other)?;
     text.push('\n');
     atomic_write(&sets_path(), text.as_bytes())

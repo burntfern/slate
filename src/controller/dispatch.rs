@@ -111,7 +111,7 @@ impl Controller {
             }
             Cmd::CheckForUpdates => self.check_for_updates(cx),
             Cmd::OpenSlateFolder => {
-                crate::win::shell::open_folder(&config::slate_dir());
+                crate::win::shell::open_folder(&config::paths::data_dir());
             }
         }
         self.sync_worker();
