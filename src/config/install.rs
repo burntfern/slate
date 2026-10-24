@@ -1,19 +1,19 @@
 use std::path::{Path, PathBuf};
 
-use super::paths;
+use super::load::app_dir;
 use super::save::atomic_write;
 use super::schema::InstallRecord;
 
 pub fn slate_dir() -> PathBuf {
-    paths::install_dir()
+    app_dir()
 }
 
 pub fn canonical_exe_path() -> PathBuf {
-    paths::install_dir().join(crate::core::install::CANONICAL_NAME)
+    slate_dir().join(crate::core::install::CANONICAL_NAME)
 }
 
 pub fn install_path() -> PathBuf {
-    paths::data_dir().join("install.json")
+    slate_dir().join("install.json")
 }
 
 pub fn load_install() -> Option<InstallRecord> {
@@ -25,7 +25,7 @@ pub fn save_install(record: &InstallRecord) -> bool {
 }
 
 pub fn staging_updates_dir() -> PathBuf {
-    paths::updates_dir()
+    slate_dir().join("updates")
 }
 
 fn read_install(path: &Path) -> Option<InstallRecord> {
@@ -64,22 +64,26 @@ mod tests {
             pid: 99,
         };
         assert!(write_install(&dir.join("install.json"), &record));
+        assert_eq!(
+            canonical_exe_path().parent().and_then(|p| p.file_name()),
+            Some(std::ffi::OsStr::new("slate"))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn the_slate_dir_is_the_folder_the_menu_opens() {
         let dir = slate_dir();
-        assert_eq!(dir.file_name().and_then(|n| n.to_str()), Some("Slate"));
+        assert_eq!(dir.file_name().and_then(|n| n.to_str()), Some("slate"));
         assert_eq!(
             dir.parent()
                 .and_then(|p| p.file_name())
                 .and_then(|n| n.to_str()),
-            Some("Burntfern")
+            Some(".burntfern")
         );
         assert_eq!(canonical_exe_path().parent(), Some(dir.as_path()));
-        assert_eq!(install_path().parent(), Some(super::paths::data_dir().as_path()));
-        assert_eq!(staging_updates_dir().parent(), Some(super::paths::data_dir().as_path()));
+        assert_eq!(install_path().parent(), Some(dir.as_path()));
+        assert_eq!(staging_updates_dir().parent(), Some(dir.as_path()));
     }
 
     #[test]
