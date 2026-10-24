@@ -106,12 +106,14 @@ impl HostWindow {
             };
             let end = current.len();
             field.update(cx, |f, cx| {
-                f.set_text(current, cx);
-                f.select(0..end, cx);
+                f.set_text(current.clone(), cx);
+                if !current.is_empty() {
+                    f.select(0..end, cx);
+                }
             });
         }
         let (title, label, submit) = match prompt {
-            SavedPrompt::Save => ("Save tab set", "Set name", "Save"),
+            SavedPrompt::Save => ("Save or update set", "Set name", "Save / Update"),
             SavedPrompt::Rename(_) => ("Rename tab set", "Set name", "Rename"),
         };
         Some(

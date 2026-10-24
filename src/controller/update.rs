@@ -7,7 +7,6 @@ use super::Controller;
 use crate::config;
 use crate::core::update::{self, UpdateState, CHECK_COOLDOWN_SECS};
 use crate::win::process_alive;
-use crate::win::shell::open_url;
 
 pub(super) fn startup_install() -> crate::core::install::Plan {
     let current_exe = std::env::current_exe()
@@ -39,8 +38,8 @@ pub(super) fn startup_install() -> crate::core::install::Plan {
 
 impl Controller {
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.update, UpdateState::Available(_)) {
-            open_url(update::RELEASES_URL);
+        if let UpdateState::Available(version) = self.update.clone() {
+            self.install_available_update(version, cx);
             return;
         }
         let now = update::now_secs();
@@ -72,6 +71,54 @@ impl Controller {
         .detach();
     }
 
+    fn install_available_update(&mut self, version: String, cx: &mut Context<Self>) {
+        self.push_toast(
+            Toast::new(format!("Downloading v{version}"))
+                .severity(Severity::Info)
+                .body("Downloading and verifying update..."),
+            cx,
+        );
+        cx.spawn(async move |this, cx| {
+            let version_clone = version.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let downloaded = crate::win::update::download_release(&version_clone)?;
+                    let canonical = config::canonical_exe_path();
+                    let pid = std::process::id();
+                    crate::win::update::spawn_swap_helper(pid, &canonical, &downloaded)?;
+                    if !config::save_install(&config::InstallRecord {
+                        path: canonical.to_string_lossy().into_owned(),
+                        version: version_clone.clone(),
+                        pid,
+                    }) {
+                        return Err("failed to write install record".to_string());
+                    }
+                    Ok(version_clone)
+                })
+                .await;
+            let _ = this.update(cx, |controller, cx| match result {
+                Ok(v) => {
+                    controller.push_toast(
+                        Toast::new("Installing update")
+                            .severity(Severity::Success)
+                            .body(format!("v{v} verified. Slate will restart shortly.")),
+                        cx,
+                    );
+                    controller.invalidate_info();
+                    cx.notify();
+                }
+                Err(err) => {
+                    controller.update = UpdateState::Available(version);
+                    controller.invalidate_info();
+                    cx.notify();
+                    controller.push_toast(update_toast("Update failed", Severity::Danger, err), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn apply_update_result(&mut self, result: Result<String, String>, cx: &mut Context<Self>) {
         match result {
             Ok(version) if update::is_newer(update::CURRENT_VERSION, &version) => {
@@ -80,10 +127,8 @@ impl Controller {
                 self.update = UpdateState::Available(version.clone());
                 let toast = Toast::new(format!("v{version} is out"))
                     .severity(Severity::Success)
-                    .body("Download it from the releases page.")
-                    .action("Open releases page", move |_, _| {
-                        open_url(update::RELEASES_URL)
-                    });
+                    .body("Click update to download and install.")
+                    .action("Update now", |_window, _app: &mut gpui::App| {});
                 self.push_toast(toast, cx);
             }
             Ok(_) => {

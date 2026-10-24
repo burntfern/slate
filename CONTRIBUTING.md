@@ -67,3 +67,11 @@ Data flows one way: **UI -> command -> controller -> Win32 -> core state**. The 
 never calls Win32 directly; it dispatches a `Cmd` and re-renders from the
 snapshot the controller publishes. See `src/controller/` for the command
 handling and `src/win/` for the platform layer.
+
+## File layout
+
+- `src/core/` - pure state (groups, tabs, saved sets, install/update planning)
+- `src/config/` - load/save/schema and path abstraction
+- `src/controller/` - `Cmd` dispatch and snapshot; owns Win32 integration
+- `src/win/` - Win32 enumeration, hosting, hooks, tray, icons, capture, updates, janitor
+- `src/ui/` - gpui views (host window, tab bar, overlays, panels)

@@ -83,17 +83,6 @@ struct Index {
     by_tab: HashMap<(GroupId, TabId), isize>,
 }
 
-fn saved_detail(count: usize, available: usize) -> SharedString {
-    let closed = count.saturating_sub(available);
-    if closed == 0 {
-        SharedString::from(format!("{available} available"))
-    } else if available == 0 {
-        SharedString::from(format!("{closed} closed"))
-    } else {
-        SharedString::from(format!("{available} available \u{00b7} {closed} closed"))
-    }
-}
-
 impl Controller {
     pub fn new(cx: &mut Context<Self>) -> Self {
         config::ensure();
@@ -306,7 +295,7 @@ impl Controller {
                         id: s.id,
                         name: s.name.clone(),
                         available,
-                        detail: saved_detail(s.tabs.len(), available),
+                        total: s.tabs.len(),
                     }
                 })
                 .collect(),
@@ -322,6 +311,8 @@ impl Controller {
             update_label,
         }
     }
+
+    // refresh_saved_avail defined in sets.rs to avoid duplication
 
     pub fn toaster(&self) -> Entity<Toaster> {
         self.toaster.clone()

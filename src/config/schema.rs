@@ -79,7 +79,7 @@ pub struct InstallRecord {
     pub pid: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SavedTab {
     #[serde(default)]
     pub exe_path: String,
@@ -87,6 +87,8 @@ pub struct SavedTab {
     pub exe_name: String,
     #[serde(default)]
     pub title_hint: String,
+    #[serde(default)]
+    pub accent: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -175,6 +177,7 @@ mod tests {
                     exe_path: "C:\\x\\chrome.exe".into(),
                     exe_name: "chrome.exe".into(),
                     title_hint: "Tab".into(),
+                    accent: None,
                 }],
             }],
         };

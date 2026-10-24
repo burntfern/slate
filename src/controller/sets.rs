@@ -14,7 +14,7 @@ impl Controller {
         self.saved_menu_open = open;
     }
 
-    fn refresh_saved_avail(&mut self) {
+    pub(super) fn refresh_saved_avail(&mut self) {
         self.saved_avail = self
             .saved_sets
             .iter()
@@ -22,7 +22,7 @@ impl Controller {
             .collect();
     }
 
-    fn resolve_set(&self, set: &config::SavedSet) -> Vec<isize> {
+    pub(super) fn resolve_set(&self, set: &config::SavedSet) -> Vec<isize> {
         let mut used: HashSet<isize> = self.styling.keys().copied().collect();
         let mut chosen = Vec::new();
         for tab in &set.tabs {
@@ -61,6 +61,7 @@ impl Controller {
                 exe_path: t.window.exe_path.clone(),
                 exe_name: t.window.exe_name.clone(),
                 title_hint: t.window.title.clone(),
+                accent: self.tab_colors.get(&t.window.hwnd).copied(),
             })
             .collect();
         if tabs.is_empty() {
@@ -73,6 +74,7 @@ impl Controller {
             self.saved_sets.push(config::SavedSet { id, name, tabs });
         }
         self.persist_sets();
+        self.refresh_saved_avail();
     }
 
     pub(super) fn commit_rename_set(&mut self, id: u64, name: String) {
@@ -100,8 +102,28 @@ impl Controller {
             return;
         };
         self.windows = enumerate_windows();
-        for hwnd in self.resolve_set(&set) {
-            self.add_window(hwnd);
+        let hwnds = self.resolve_set(&set);
+        for hwnd in &hwnds {
+            self.add_window(*hwnd);
+        }
+        for (i, tab) in set.tabs.iter().enumerate() {
+            if let Some(accent) = tab.accent {
+                if let Some(hwnd) = hwnds.get(i) {
+                    if let Some((group, tab_id)) = self.tab_of_hwnd(*hwnd) {
+                        self.set_tab_color(group, tab_id, Some(accent));
+                        continue;
+                    }
+                }
+                if let Some(gid) = self.active_group {
+                    if let Some(g) = self.groups.group(gid) {
+                        if let Some(t) = g.tabs.get(i) {
+                            if t.window.exe_path.eq_ignore_ascii_case(&tab.exe_path) {
+                                self.set_tab_color(gid, t.id, Some(accent));
+                            }
+                        }
+                    }
+                }
+            }
         }
         self.saved_menu_open = false;
     }

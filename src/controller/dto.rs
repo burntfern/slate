@@ -174,7 +174,7 @@ pub struct SavedSetInfo {
     pub id: u64,
     pub name: String,
     pub available: usize,
-    pub detail: SharedString,
+    pub total: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

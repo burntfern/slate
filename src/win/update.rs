@@ -1,52 +1,69 @@
+use std::fs;
+use std::io::{Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use reqwest::blocking::Client;
+use sha2::{Digest, Sha256};
+use tracing::{error, info};
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::config;
 use crate::core::install;
 use crate::core::update::{self, parse_release_tag, LATEST_API_URL};
 
+fn http_client() -> Result<Client, String> {
+    Client::builder()
+        .user_agent("slate-update-check")
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|err| format!("http client: {err}"))
+}
+
 pub fn bootstrap(source: &str) -> Result<(), String> {
+    info!("bootstrap update from {source}");
     let source_path = Path::new(source);
     let (version, arch) = install::parse_release_filename(source_path)
         .ok_or_else(|| "downloaded exe is not a recognized release asset".to_string())?;
     let canonical = config::canonical_exe_path();
     if let Some(parent) = canonical.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("slate dir: {err}"))?;
+        fs::create_dir_all(parent).map_err(|err| format!("slate dir: {err}"))?;
     }
     let staging = config::staging_updates_dir();
-    std::fs::create_dir_all(&staging).map_err(|err| format!("staging dir: {err}"))?;
+    fs::create_dir_all(&staging).map_err(|err| format!("staging dir: {err}"))?;
     let staged = staging.join(install::STAGED_NAME);
-    std::fs::copy(source_path, &staged).map_err(|err| format!("stage: {err}"))?;
+    fs::copy(source_path, &staged).map_err(|err| format!("stage: {err}"))?;
     let asset = update::asset_name(&version, &arch);
     let sums = fetch_sums(&version)?;
-    if let Some(expected) = install::checksum_for(&sums, &asset) {
-        let actual = file_hash(&staged)?;
-        if actual != expected {
-            let _ = std::fs::remove_file(&staged);
-            return Err(format!(
-                "checksum mismatch for {asset}: expected {expected}, got {actual}"
-            ));
-        }
+    let expected = install::checksum_for(&sums, &asset)
+        .ok_or_else(|| format!("missing checksum for {asset} in SHA256SUMS"))?;
+    let actual = file_hash(&staged)?;
+    if actual != expected {
+        let _ = fs::remove_file(&staged);
+        error!("checksum mismatch for {asset}");
+        return Err(format!(
+            "checksum mismatch for {asset}: expected {expected}, got {actual}"
+        ));
     }
     let backup = install::backup_path(&canonical);
     if install::needs_backup(canonical.exists(), backup.exists()) {
-        std::fs::rename(&canonical, &backup).map_err(|err| format!("backup: {err}"))?;
+        fs::rename(&canonical, &backup).map_err(|err| format!("backup: {err}"))?;
     }
-    std::fs::rename(&staged, &canonical).map_err(|err| format!("publish: {err}"))?;
+    fs::rename(&staged, &canonical).map_err(|err| format!("publish: {err}"))?;
     if !config::save_install(&config::InstallRecord {
         path: canonical.to_string_lossy().into_owned(),
-        version,
+        version: version.clone(),
         pid: std::process::id(),
     }) {
         return Err("failed to write install record".to_string());
     }
+    info!("bootstrap complete version {version}");
     Ok(())
 }
 
 pub fn refresh_install_from(candidate: &str) -> Result<(), String> {
+    info!("refresh install from {candidate}");
     let candidate_path = Path::new(candidate);
     let (version, _arch) = install::parse_release_filename(candidate_path)
         .ok_or_else(|| "downloaded exe is not a recognized release asset".to_string())?;
@@ -56,45 +73,43 @@ pub fn refresh_install_from(candidate: &str) -> Result<(), String> {
     spawn_swap_helper(pid, &canonical, &downloaded)?;
     if !config::save_install(&config::InstallRecord {
         path: canonical.to_string_lossy().into_owned(),
-        version,
+        version: version.clone(),
         pid,
     }) {
         return Err("failed to write install record".to_string());
     }
+    info!("swap helper spawned for version {version}");
     Ok(())
 }
 
 pub fn fetch_latest() -> Result<String, String> {
-    let output = Command::new("curl.exe")
-        .args([
-            "-sSL",
-            "--max-time",
-            "15",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "User-Agent: slate-update-check",
-            "-w",
-            "\n%{http_code}",
-            LATEST_API_URL,
-        ])
-        .creation_flags(CREATE_NO_WINDOW.0)
-        .output()
-        .map_err(|err| format!("curl: {err}"))?;
-    if !output.status.success() {
-        return Err(match output.status.code() {
-            Some(6) => "Offline - could not reach github.com".to_string(),
-            Some(28) => "Timed out - try again".to_string(),
-            Some(code) => format!("Network error {code}"),
-            None => "Interrupted".to_string(),
-        });
+    let client = http_client()?;
+    let res = client
+        .get(LATEST_API_URL)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "slate-update-check")
+        .send()
+        .map_err(|err| {
+            if err.is_timeout() {
+                "Timed out - try again".to_string()
+            } else if err.is_connect() {
+                "Offline - could not reach github.com".to_string()
+            } else {
+                format!("Network error: {err}")
+            }
+        })?;
+    let status = res.status();
+    if status.as_u16() == 403 || status.as_u16() == 429 {
+        return Err("GitHub is rate-limiting update checks (60/hour) - try later".to_string());
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let (body, status) = split_status(&text);
-    if let Some(err) = status_error(status) {
-        return Err(err);
+    if status.as_u16() == 404 {
+        return Err("No releases published yet".to_string());
     }
-    parse_release_tag(body).ok_or_else(|| "no release tag in response".to_string())
+    if !status.is_success() {
+        return Err(format!("GitHub returned HTTP {}", status.as_u16()));
+    }
+    let body = res.text().map_err(|err| format!("read body: {err}"))?;
+    parse_release_tag(&body).ok_or_else(|| "no release tag in response".to_string())
 }
 
 pub fn asset_arch() -> &'static str {
@@ -105,38 +120,51 @@ pub fn asset_arch() -> &'static str {
 }
 
 pub fn download_release(version: &str) -> Result<PathBuf, String> {
+    info!("downloading release v{version}");
     let arch = asset_arch();
     let asset = update::asset_name(version, arch);
     let url = update::download_url(version, arch);
     let staging = config::staging_updates_dir();
-    std::fs::create_dir_all(&staging).map_err(|err| format!("staging dir: {err}"))?;
+    fs::create_dir_all(&staging).map_err(|err| format!("staging dir: {err}"))?;
     let dest = staging.join(install::staged_download_name(version, arch));
-    let dest_arg = dest.to_string_lossy().into_owned();
-    let output = Command::new("curl.exe")
-        .args(["-sSL", "--max-time", "300", "-f", "-o", &dest_arg, &url])
-        .creation_flags(CREATE_NO_WINDOW.0)
-        .output()
-        .map_err(|err| format!("curl: {err}"))?;
-    if !output.status.success() {
-        let _ = std::fs::remove_file(&dest);
-        return Err(match output.status.code() {
-            Some(6) => "Offline - could not reach github.com".to_string(),
-            Some(22) => "Release asset not ready yet".to_string(),
-            Some(28) => "Timed out - try again".to_string(),
-            Some(code) => format!("Network error {code}"),
-            None => "Interrupted".to_string(),
-        });
+    let client = http_client()?;
+    let mut res = client
+        .get(&url)
+        .header("User-Agent", "slate-updater")
+        .send()
+        .map_err(|err| {
+            if err.is_timeout() {
+                "Timed out - try again".to_string()
+            } else if err.is_connect() {
+                "Offline - could not reach github.com".to_string()
+            } else {
+                format!("Network error: {err}")
+            }
+        })?;
+    if res.status().as_u16() == 404 {
+        let _ = fs::remove_file(&dest);
+        return Err("Release asset not ready yet".to_string());
     }
+    if !res.status().is_success() {
+        let _ = fs::remove_file(&dest);
+        return Err(format!("Network error {}", res.status().as_u16()));
+    }
+    let mut file = fs::File::create(&dest).map_err(|err| format!("create file: {err}"))?;
+    res.copy_to(&mut file)
+        .map_err(|err| format!("download: {err}"))?;
+    let _ = file.flush();
     let sums = fetch_sums(version)?;
-    if let Some(expected) = install::checksum_for(&sums, &asset) {
-        let actual = file_hash(&dest)?;
-        if actual != expected {
-            let _ = std::fs::remove_file(&dest);
-            return Err(format!(
-                "checksum mismatch for {asset}: expected {expected}, got {actual}"
-            ));
-        }
+    let expected = install::checksum_for(&sums, &asset)
+        .ok_or_else(|| format!("missing checksum for {asset} in SHA256SUMS"))?;
+    let actual = file_hash(&dest)?;
+    if actual != expected {
+        let _ = fs::remove_file(&dest);
+        error!("checksum mismatch for {asset}");
+        return Err(format!(
+            "checksum mismatch for {asset}: expected {expected}, got {actual}"
+        ));
     }
+    info!("downloaded and verified {asset}");
     Ok(dest)
 }
 
@@ -145,38 +173,36 @@ fn fetch_sums(version: &str) -> Result<String, String> {
         "https://github.com/{}/releases/download/v{version}/SHA256SUMS",
         update::REPO_SLUG
     );
-    let output = Command::new("curl.exe")
-        .args(["-sSL", "--max-time", "30", "-f", &sums_url])
-        .creation_flags(CREATE_NO_WINDOW.0)
-        .output()
-        .map_err(|err| format!("curl: {err}"))?;
-    if !output.status.success() {
-        return Ok(String::new());
+    let client = http_client()?;
+    let res = client
+        .get(&sums_url)
+        .header("User-Agent", "slate-updater")
+        .send()
+        .map_err(|err| format!("fetch sums: {err}"))?;
+    if !res.status().is_success() {
+        return Err(format!(
+            "failed to fetch SHA256SUMS: {}",
+            res.status().as_u16()
+        ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    res.text().map_err(|err| format!("read sums: {err}"))
 }
 
 fn file_hash(path: &Path) -> Result<String, String> {
-    let output = Command::new("certutil.exe")
-        .args(["-hashfile", path.to_string_lossy().as_ref(), "SHA256"])
-        .creation_flags(CREATE_NO_WINDOW.0)
-        .output()
-        .map_err(|err| format!("certutil: {err}"))?;
-    if !output.status.success() {
-        return Err("certutil failed".to_string());
+    let mut file = fs::File::open(path).map_err(|err| format!("open file: {err}"))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|err| format!("read file: {err}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines()
-        .nth(1)
-        .and_then(|line| {
-            let line = line.trim();
-            if line.len() == 64 && line.chars().all(|c| c.is_ascii_hexdigit()) {
-                Some(line.to_ascii_lowercase())
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| "certutil output unexpected".to_string())
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
 }
 
 pub fn spawn_swap_helper(pid: u32, target: &Path, staged: &Path) -> Result<(), String> {
@@ -239,6 +265,7 @@ fn helper_script(pid: u32, target: &Path, staged: &Path) -> String {
     )
 }
 
+#[cfg(test)]
 fn split_status(text: &str) -> (&str, &str) {
     match text.rsplit_once('\n') {
         Some((body, status)) => (body, status.trim()),
@@ -246,14 +273,17 @@ fn split_status(text: &str) -> (&str, &str) {
     }
 }
 
+#[cfg(test)]
 fn status_error(status: &str) -> Option<String> {
-    Some(match status {
-        "200" => return None,
-        "403" | "429" => "GitHub is rate-limiting update checks (60/hour) - try later".to_string(),
-        "404" => "No releases published yet".to_string(),
-        "" | "000" => "No response from GitHub".to_string(),
-        other => format!("GitHub returned HTTP {other}"),
-    })
+    match status {
+        "200" => None,
+        "403" | "429" => {
+            Some("GitHub is rate-limiting update checks (60/hour) - try later".to_string())
+        }
+        "404" => Some("No releases published yet".to_string()),
+        "" | "000" => Some("No response from GitHub".to_string()),
+        other => Some(format!("GitHub returned HTTP {other}")),
+    }
 }
 
 #[cfg(test)]

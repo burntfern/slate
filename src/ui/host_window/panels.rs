@@ -750,7 +750,10 @@ fn saved_set_row(set: &SavedSetInfo, controller: &Entity<Controller>, cx: &App) 
                             div()
                                 .text_size(text_xs)
                                 .text_color(detail_color)
-                                .child(set.detail.clone()),
+                                .child(format!(
+                                    "{} windows - {} available",
+                                    set.total, set.available
+                                )),
                         ),
                 ),
         )

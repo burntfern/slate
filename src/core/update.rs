@@ -1,5 +1,6 @@
 pub const REPO_SLUG: &str = "divyanshudhruv/slate";
 pub const REPOSITORY_URL: &str = "https://github.com/divyanshudhruv/slate";
+#[allow(dead_code)]
 pub const RELEASES_URL: &str = "https://github.com/divyanshudhruv/slate/releases/latest";
 pub const LATEST_API_URL: &str =
     "https://api.github.com/repos/divyanshudhruv/slate/releases/latest";
