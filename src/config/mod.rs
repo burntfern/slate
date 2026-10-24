@@ -1,3 +1,4 @@
+pub mod paths;
 mod install;
 mod load;
 mod save;
