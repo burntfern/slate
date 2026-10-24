@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.0](https://github.com/divyanshudhruv/slate/compare/v0.3.0...v0.4.0) (2026-10-24)
+
+
+### Features
+
+* **updates:** in-app auto-download, install with mandatory checksum verification ([f02c9bb](https://github.com/divyanshudhruv/slate/commit/f02c9bb9ac82a6cd5f20e58b9892f9a318de9ec0))
+
+
+### Bug Fixes
+
+* **ci:** allow CDLA-Permissive-2.0 and clean warnings for fmt/clippy ([11355c6](https://github.com/divyanshudhruv/slate/commit/11355c601a9230205b393b2f2b5860a95ec373bd))
+* **saved-sets:** restore tab accent colors on restore/add, simplify UI, and clean up DTO ([03f7d2d](https://github.com/divyanshudhruv/slate/commit/03f7d2d9233b78cc11fd3cc55666e50b895b0807))
+
+
+### Refactoring
+
+* **saved-sets:** remove UpdateSet dead code and clean up unused helpers ([ddbc0c9](https://github.com/divyanshudhruv/slate/commit/ddbc0c92333bf15ea32c9284543f43d1a4e92226))
+* **storage:** split install/data dirs and auto-migrate from .burntfern ([7f2f6cf](https://github.com/divyanshudhruv/slate/commit/7f2f6cfc4726442ad164779360add194d83ae3cb))
+
+
+### Documentation
+
+* **readme:** update list format ([44c6fd5](https://github.com/divyanshudhruv/slate/commit/44c6fd52030789af2d886b4171f6488a7a4964f6))
+
 ## [0.3.0](https://github.com/divyanshudhruv/slate/compare/v0.2.1...v0.3.0) (2026-10-18)
 
 
