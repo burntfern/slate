@@ -31,27 +31,28 @@
 - [Usage](#usage)
 - [Files and data](#files-and-data)
 - [Limitations](#limitations)
+- [Star History](#star-history)
 - [License](#license)
 
 ## Features
 
-**`1`** **`Any window as a tab`** - add one from the `+` picker, Ctrl-drag a window onto the host, or hover it in pick mode and press `TAB`
+**`1. Any window as a tab`** - add one from the `+` picker, Ctrl-drag a window onto the host, or hover it in pick mode and press `TAB`
 
-**`2`** **`Drag out to detach`** - drag a tab off the strip to send its window back to the desktop at the drop point, across monitors
+**`2. Drag out to detach`** - drag a tab off the strip to send its window back to the desktop at the drop point, across monitors
 
-**`3`** **`Per-tab accents`** - color-code tabs by hue from the tab menu (session only)
+**`3. Per-tab accents`** - color-code tabs by hue from the tab menu (session only)
 
-**`4`** **`Saved sets`** - snapshot the open tabs as a named set and restore it later; restoring only re-hosts windows that are already running
+**`4. Saved sets`** - snapshot the open tabs as a named set and restore it later; restoring only re-hosts windows that are already running
 
-**`5`** **`Hover preview`** - rest on a tab for a live snapshot of its window
+**`5. Hover preview`** - rest on a tab for a live snapshot of its window
 
-**`6`** **`Global shortcuts`** - `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`, `Ctrl`+`1..9` and `Ctrl`+`W` keep working while a hosted window has focus
+**`6. Global shortcuts`** - `Ctrl`+`Tab`, `Ctrl`+`Shift`+`Tab`, `Ctrl`+`1..9` and `Ctrl`+`W` keep working while a hosted window has focus
 
-**`7`** **`Tray icon`** - restore the host or exit from the notification area
+**`7. Tray icon`** - restore the host or exit from the notification area
 
-**`8`** **`Self-updating`** - **Check for updates** downloads and installs updates in-app with mandatory SHA256 checksum verification. Updates are swapped into the installed location with automatic rollback support.
+**`8. Self-updating`** - **Check for updates** downloads and installs updates in-app with mandatory SHA256 checksum verification. Updates are swapped into the installed location with automatic rollback support.
 
-**`9`** **`Light and dark themes`** - following the system by default
+**`9. Light and dark themes`** - following the system by default
 
 ## Gallery
 
@@ -205,18 +206,25 @@ On first run, Slate migrates from `%USERPROFILE%\.burntfern\` automatically with
 
 ## Limitations
 
-**`1`** **Windows only.** Slate relies on Win32 window ownership, DWM frame
+**`1. Windows only`** - Slate relies on Win32 window ownership, DWM frame
 control, and GDI icon extraction.
 
-**`2`** **Owned windows draw above the host.** While a Slate menu or dialog is
+**`2. Owned windows draw above the host`** - While a Slate menu or dialog is
 open, it covers the active member. Tooltips and toasts that overlap a hosted
 window have the same problem.
 
-**`3`** **No launching, no elevation.** Slate hosts windows that are already
-running. It skips elevated windows unless Slate itself is elevated.
+## Star History
+
+<a href="https://www.star-history.com/?repos=divyanshudhruv%2Fslate&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=divyanshudhruv/slate&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=divyanshudhruv/slate&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=divyanshudhruv/slate&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## License
 
-GNU General Public License v3.0. See [LICENSE](LICENSE).
+Slate is licensed under the [GNU General Public License v3.0](LICENSE). 
 
 Copyright © 2026 Divyanshu Dhruv
