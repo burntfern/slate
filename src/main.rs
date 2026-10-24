@@ -2,9 +2,9 @@
 
 #[cfg(windows)]
 mod config;
+mod core;
 #[cfg(windows)]
 mod logging;
-mod core;
 #[cfg(windows)]
 mod win;
 
@@ -20,7 +20,7 @@ use gpui::{px, size, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOp
 
 #[cfg(windows)]
 fn main() {
-    let _ = crate::config::paths::ensure_dirs();
+    crate::config::paths::ensure_dirs();
     logging::init();
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--janitor") {

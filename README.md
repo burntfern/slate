@@ -227,4 +227,4 @@ window have the same problem.
 
 Slate is licensed under the [GNU General Public License v3.0](LICENSE). 
 
-Copyright © 2026 Divyanshu Dhruv
+`Copyright © 2026 Divyanshu Dhruv`

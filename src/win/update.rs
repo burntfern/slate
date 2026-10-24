@@ -6,7 +6,7 @@ use std::process::Command;
 
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::config;
@@ -180,7 +180,10 @@ fn fetch_sums(version: &str) -> Result<String, String> {
         .send()
         .map_err(|err| format!("fetch sums: {err}"))?;
     if !res.status().is_success() {
-        return Err(format!("failed to fetch SHA256SUMS: {}", res.status().as_u16()));
+        return Err(format!(
+            "failed to fetch SHA256SUMS: {}",
+            res.status().as_u16()
+        ));
     }
     res.text().map_err(|err| format!("read sums: {err}"))
 }
@@ -190,7 +193,9 @@ fn file_hash(path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 8192];
     loop {
-        let n = file.read(&mut buf).map_err(|err| format!("read file: {err}"))?;
+        let n = file
+            .read(&mut buf)
+            .map_err(|err| format!("read file: {err}"))?;
         if n == 0 {
             break;
         }
@@ -260,6 +265,7 @@ fn helper_script(pid: u32, target: &Path, staged: &Path) -> String {
     )
 }
 
+#[cfg(test)]
 fn split_status(text: &str) -> (&str, &str) {
     match text.rsplit_once('\n') {
         Some((body, status)) => (body, status.trim()),
@@ -267,14 +273,17 @@ fn split_status(text: &str) -> (&str, &str) {
     }
 }
 
+#[cfg(test)]
 fn status_error(status: &str) -> Option<String> {
-    Some(match status {
-        "200" => return None,
-        "403" | "429" => "GitHub is rate-limiting update checks (60/hour) - try later".to_string(),
-        "404" => "No releases published yet".to_string(),
-        "" | "000" => "No response from GitHub".to_string(),
-        other => format!("GitHub returned HTTP {other}"),
-    })
+    match status {
+        "200" => None,
+        "403" | "429" => {
+            Some("GitHub is rate-limiting update checks (60/hour) - try later".to_string())
+        }
+        "404" => Some("No releases published yet".to_string()),
+        "" | "000" => Some("No response from GitHub".to_string()),
+        other => Some(format!("GitHub returned HTTP {other}")),
+    }
 }
 
 #[cfg(test)]

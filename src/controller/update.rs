@@ -7,7 +7,6 @@ use super::Controller;
 use crate::config;
 use crate::core::update::{self, UpdateState, CHECK_COOLDOWN_SECS};
 use crate::win::process_alive;
-use crate::win::shell::open_url;
 
 pub(super) fn startup_install() -> crate::core::install::Plan {
     let current_exe = std::env::current_exe()
@@ -113,10 +112,7 @@ impl Controller {
                     controller.update = UpdateState::Available(version);
                     controller.invalidate_info();
                     cx.notify();
-                    controller.push_toast(
-                        update_toast("Update failed", Severity::Danger, err),
-                        cx,
-                    );
+                    controller.push_toast(update_toast("Update failed", Severity::Danger, err), cx);
                 }
             });
         })

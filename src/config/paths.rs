@@ -48,10 +48,12 @@ pub fn is_portable() -> bool {
     false
 }
 
+#[allow(dead_code)]
 pub fn old_burntfern_root() -> PathBuf {
     home_dir().join(".burntfern")
 }
 
+#[allow(dead_code)]
 pub fn old_slate_dir() -> PathBuf {
     old_burntfern_root().join("slate")
 }
@@ -90,10 +92,12 @@ pub fn logs_dir() -> PathBuf {
     data_dir()
 }
 
+#[allow(dead_code)]
 pub fn config_dir() -> PathBuf {
     data_dir()
 }
 
+#[allow(dead_code)]
 pub fn app_dir_legacy() -> PathBuf {
     old_slate_dir()
 }
