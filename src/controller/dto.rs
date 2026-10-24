@@ -88,6 +88,10 @@ pub enum Cmd {
         id: u64,
         name: String,
     },
+    #[allow(dead_code)]
+    UpdateSet {
+        id: u64,
+    },
     RestoreSet {
         id: u64,
     },
@@ -174,7 +178,7 @@ pub struct SavedSetInfo {
     pub id: u64,
     pub name: String,
     pub available: usize,
-    pub detail: SharedString,
+    pub total: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -40,9 +40,9 @@
 
 **`2. Drag out to detach`** - drag a tab off the strip to send its window back to the desktop at the drop point, across monitors
 
-**`3. Per-tab accents`** - color-code tabs by hue from the tab menu (session only)
+**`3. Per-tab accents`** - color-code tabs by hue from the tab menu; colors are saved with tab sets
 
-**`4. Saved sets`** - snapshot the open tabs as a named set and restore it later; restoring only re-hosts windows that are already running
+**`4. Saved sets`** - snapshot the open tabs as a named set and restore it later. Save overwrites an existing set with the same name; restoring only re-hosts windows that are already running
 
 **`5. Hover preview`** - rest on a tab for a live snapshot of its window
 
@@ -225,6 +225,6 @@ window have the same problem.
 
 ## License
 
-Slate is licensed under the [GNU General Public License v3.0](LICENSE). 
+Slate is licensed under the [GNU General Public License v3.0](LICENSE).
 
 `Copyright © 2026 Divyanshu Dhruv`
