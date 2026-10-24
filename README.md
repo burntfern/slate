@@ -49,7 +49,7 @@
 
 **`7`** **`Tray icon`** - restore the host or exit from the notification area
 
-**`8`** **`Self-updating`** - **Check for updates** tells you when a new release is out and links to the downloads page; install it by running the newer release asset, which Slate copies over the canonical `%USERPROFILE%\.burntfern\slate\slate.exe` and restarts from, keeping the exe it replaces beside it until a clean run so a failed swap can fall back to it
+**`8`** **`Self-updating`** - **Check for updates** downloads and installs updates in-app with mandatory SHA256 checksum verification. Updates are swapped into the installed location with automatic rollback support.
 
 **`9`** **`Light and dark themes`** - following the system by default
 
@@ -189,18 +189,19 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Files and data
 
-Slate stores everything under `%USERPROFILE%\.burntfern`:
+| Path | Purpose |
+| ---- | ------- |
+| `%LOCALAPPDATA%\Programs\Burntfern\Slate\` | Install directory (contains `slate.exe`) |
+| `%LOCALAPPDATA%\Burntfern\Slate\` | Data directory |
+| `%LOCALAPPDATA%\Burntfern\Slate\config.json` | Theme and accent |
+| `%LOCALAPPDATA%\Burntfern\Slate\settings.json` | Tab, preview, and shortcut settings |
+| `%LOCALAPPDATA%\Burntfern\Slate\sets.json` | Saved tab sets |
+| `%LOCALAPPDATA%\Burntfern\Slate\install.json` | Registered copy (path, version, pid) used by updates and single-instance checks |
+| `%LOCALAPPDATA%\Burntfern\Slate\slate.log` | Logs |
+| `%LOCALAPPDATA%\Burntfern\Slate\updates\` | Downloaded updates and swap helper |
+| `%LOCALAPPDATA%\Burntfern\Slate\backups\` | Backups |
 
-| File                   | What it holds                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------- |
-| `config.json`          | Theme and accent                                                                                  |
-| `slate\settings.json`  | Tab, preview, and shortcut settings                                                               |
-| `slate\sets.json`      | Saved tab sets                                                                                    |
-| `slate\install.json`   | The registered copy (path, version, pid) that powers updates and the single-instance check |
-| `slate\slate.exe`      | The canonical copy Slate installs as and updates in place                                         |
-| `slate\slate.exe.old`  | The previous exe, kept until a successful run, so a failed update can fall back to it             |
-| `slate\updates\`       | Downloaded releases and the swap helper, cleaned up as they are used                              |
-| `slate\backups\`       | Timestamped config backups                                                                        |
+On first run, Slate migrates from `%USERPROFILE%\.burntfern\` automatically with a backup of the old folder. Portable mode: set `SLATE_PORTABLE=1` or place `slate.portable` next to the exe to store everything alongside it.
 
 ## Limitations
 

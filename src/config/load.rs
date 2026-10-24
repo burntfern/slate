@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
-use super::paths;
 use super::schema::{SavedSet, SavedSets, Settings, SCHEMA_VERSION};
 
 #[derive(Debug, Default)]
@@ -28,28 +27,47 @@ struct PartialUpdates {
     checked_at: Option<i64>,
 }
 
+fn home_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("USERPROFILE") {
+        let dir = PathBuf::from(dir);
+        if !dir.as_os_str().is_empty() {
+            return dir;
+        }
+    }
+    let drive = std::env::var_os("HOMEDRIVE");
+    let path = std::env::var_os("HOMEPATH");
+    if let (Some(drive), Some(path)) = (drive, path) {
+        let mut combined = PathBuf::from(drive);
+        combined.push(path);
+        if !combined.as_os_str().is_empty() {
+            return combined;
+        }
+    }
+    std::env::temp_dir()
+}
+
 pub fn burntfern_root() -> PathBuf {
-    paths::old_burntfern_root()
+    home_dir().join(".burntfern")
 }
 
 pub fn app_dir() -> PathBuf {
-    paths::data_dir()
+    burntfern_root().join("slate")
 }
 
 pub fn shared_config_path() -> PathBuf {
-    paths::data_dir().join("config.json")
+    burntfern_root().join("config.json")
 }
 
 pub fn settings_path() -> PathBuf {
-    paths::data_dir().join("settings.json")
+    app_dir().join("settings.json")
 }
 
 pub fn sets_path() -> PathBuf {
-    paths::data_dir().join("sets.json")
+    app_dir().join("sets.json")
 }
 
 pub fn backups_dir() -> PathBuf {
-    paths::backups_dir()
+    app_dir().join("backups")
 }
 
 fn template_dir() -> Option<PathBuf> {
@@ -63,78 +81,18 @@ fn template_dir() -> Option<PathBuf> {
         .find(|dir| dir.is_dir())
 }
 
-fn migrate_from_burntfern() {
-    let new_data = paths::data_dir();
-    let old_root = paths::old_burntfern_root();
-    let old_slate = paths::old_slate_dir();
-    if new_data.exists() {
-        return;
-    }
-    if !old_root.exists() && !old_slate.exists() {
-        return;
-    }
-    let _ = std::fs::create_dir_all(&new_data);
-    let backup_dir = paths::backups_dir().join(format!(
-        "migration-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    ));
-    let _ = std::fs::create_dir_all(&backup_dir);
-    if old_root.exists() {
-        let _ = copy_dir(&old_root, &backup_dir.join("burntfern"));
-    }
-    let files = [
-        ("config.json", old_root.join("config.json")),
-        ("settings.json", old_slate.join("settings.json")),
-        ("sets.json", old_slate.join("sets.json")),
-        ("install.json", old_slate.join("install.json")),
-    ];
-    for (name, old_path) in files {
-        if old_path.exists() {
-            let _ = std::fs::copy(&old_path, new_data.join(name));
-        }
-    }
-    let old_backups = old_slate.join("backups");
-    if old_backups.exists() {
-        let _ = copy_dir(&old_backups, &paths::backups_dir());
-    }
-    let old_updates = old_slate.join("updates");
-    if old_updates.exists() {
-        let _ = copy_dir(&old_updates, &paths::updates_dir());
-    }
-}
-
-fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir(&from, &to)?;
-        } else if ty.is_file() {
-            let _ = std::fs::copy(&from, &to);
-        }
-    }
-    Ok(())
-}
-
 pub fn ensure() {
-    let _ = paths::ensure_dirs();
-    migrate_from_burntfern();
-    let _ = std::fs::create_dir_all(app_dir());
-    let _ = std::fs::create_dir_all(paths::backups_dir());
+    for dir in [burntfern_root(), app_dir(), backups_dir()] {
+        let _ = std::fs::create_dir_all(dir);
+    }
     if !shared_config_path().exists() {
         seed("config.json", &shared_config_path(), &SharedSeed);
     }
     if !settings_path().exists() {
-        seed("config.json", &settings_path(), &AppSeed);
+        seed("slate\\settings.json", &settings_path(), &AppSeed);
     }
     if !sets_path().exists() {
-        seed("config.json", &sets_path(), &SetsSeed);
+        seed("slate\\sets.json", &sets_path(), &SetsSeed);
     }
 }
 
